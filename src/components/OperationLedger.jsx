@@ -1,6 +1,12 @@
 import React from 'react';
 import { useAppStore } from '../store/useAppStore';
+import { explorerTxUrl } from '../wallet/chains.js';
 
+/**
+ * Real audit trail: every row is written from a backend ledger entry
+ * (GET /api/earn/history) or from a real transaction receipt. The old version
+ * seeded this table with invented rows and random tx hashes.
+ */
 export function OperationLedger() {
   const withdrawalQueue = useAppStore((s) => s.withdrawalQueue);
   const operationLedger = useAppStore((s) => s.operationLedger);
@@ -17,6 +23,11 @@ export function OperationLedger() {
             <span className="text-[10px] text-slate-500">{withdrawalQueue.length} PENDING</span>
           </div>
           <div className="space-y-2">
+            {withdrawalQueue.length === 0 && (
+              <div className="p-2 rounded bg-slate-900/60 border border-slate-800/80 text-[11px] text-slate-500">
+                No pending withdrawals. Earned FLUX is withdrawn from the "02 // WITHDRAW FLUX" tab.
+              </div>
+            )}
             {withdrawalQueue.map((item) => (
               <div
                 key={item.id}
@@ -67,6 +78,13 @@ export function OperationLedger() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-900/80">
+              {operationLedger.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="py-3 text-center text-slate-500 text-[11px]">
+                    No operations yet — generate FLUX or make a withdrawal to populate the ledger.
+                  </td>
+                </tr>
+              )}
               {operationLedger.map((row) => (
                 <tr key={row.id} className="hover:bg-cyan-950/20 transition-colors">
                   <td className="py-2.5 text-slate-400 text-[11px]">{row.time}</td>
@@ -74,7 +92,20 @@ export function OperationLedger() {
                   <td className="py-2.5 text-slate-200">{row.asset}</td>
                   <td className="py-2.5 text-right font-bold text-white">{row.value}</td>
                   <td className="py-2.5 text-right text-emerald-400">{row.fee}</td>
-                  <td className="py-2.5 text-slate-400 font-mono text-[11px]">{row.tx}</td>
+                  <td className="py-2.5 text-slate-400 font-mono text-[11px]">
+                    {row.txHash ? (
+                      <a
+                        href={explorerTxUrl(row.txHash, row.chainId)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-cyan-400 underline hover:text-white"
+                      >
+                        {row.tx} ↗
+                      </a>
+                    ) : (
+                      row.tx
+                    )}
+                  </td>
                   <td className="py-2.5 text-right">
                     <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-500/30">
                       {row.status}

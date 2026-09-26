@@ -8,3 +8,19 @@ data/
 Thumbs.db
 *.log
 
+# --- secrets / local config -------------------------------------------------
+.env
+.env.local
+.env.*.local
+api/.env
+contracts/.env
+.env.contracts.json
+
+# --- build & test output ----------------------------------------------------
+artifacts/
+cache/
+coverage/
+coverage.json
+typechain-types/
+*-output.txt
+

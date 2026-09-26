@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import confetti from 'canvas-confetti';
 import { TokenSelector } from './components/TokenSelector';
-import { FeeTiers } from './components/FeeTiers';
+import { CoinBalance } from './components/CoinBalance';
 import { WalletConnect } from './components/WalletConnect';
 import { ForgeSequence } from './components/ForgeSequence';
 import { NetworkTelemetry } from './components/NetworkTelemetry';
 import { TerminalOutput } from './components/TerminalOutput';
 import { ProtocolNotice } from './components/ProtocolNotice';
 import { OperationLedger } from './components/OperationLedger';
+import WithdrawPanel from './components/WithdrawPanel';
 import TokenTransfer from './components/TokenTransfer';
 import TokenSwap from './components/TokenSwap';
 import TokenTrade from './components/TokenTrade';
@@ -15,7 +16,7 @@ import { useWallet } from './hooks/useWallet';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('forge');
-  const { connectedWallet } = useWallet();
+  const { isConnected, networkName, truncatedAddress } = useWallet();
 
   useEffect(() => {
     window.confetti = confetti;
@@ -44,10 +45,16 @@ export default function App() {
 
         <div className="flex items-center space-x-3 text-xs">
           <div className="flex items-center space-x-1.5 bg-slate-900/80 px-3 py-1.5 rounded border border-slate-800">
-            <span className={`w-2 h-2 rounded-full ${connectedWallet?.isReal ? 'bg-emerald-400' : 'bg-cyan-400'} animate-pulse`} />
+            <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-400' : 'bg-slate-500'} animate-pulse`} />
             <span className="text-slate-400">NODE:</span>
-            <span className="text-white font-bold">{connectedWallet?.networkName || 'Ethereum Web3'}</span>
+            <span className="text-white font-bold">{networkName || 'not connected'}</span>
           </div>
+          {isConnected && (
+            <div className="flex items-center space-x-1.5 bg-slate-900/80 px-3 py-1.5 rounded border border-emerald-500/40">
+              <span className="text-slate-400">WALLET:</span>
+              <span className="text-emerald-300 font-bold">{truncatedAddress}</span>
+            </div>
+          )}
         </div>
       </header>
 
@@ -55,9 +62,10 @@ export default function App() {
       <div className="flex items-center space-x-2 mb-5 overflow-x-auto pb-1">
         {[
           { id: 'forge', label: '01 // FLASH FORGE & 3D' },
-          { id: 'transfer', label: '02 // FLASH TRANSFER' },
-          { id: 'swap', label: '03 // DEX SWAP' },
-          { id: 'trade', label: '04 // ORDERBOOK TRADE' }
+          { id: 'withdraw', label: '02 // WITHDRAW FLUX (0 GAS)' },
+          { id: 'transfer', label: '03 // FLASH TRANSFER' },
+          { id: 'swap', label: '04 // DEX SWAP' },
+          { id: 'trade', label: '05 // ORDERBOOK TRADE' }
         ].map((tab) => (
           <button
             key={tab.id}
@@ -83,7 +91,7 @@ export default function App() {
               </span>
             </div>
             <TokenSelector />
-            <FeeTiers />
+            <CoinBalance />
           </div>
           <div className="pt-2 border-t border-slate-800/80">
             <WalletConnect />
@@ -95,6 +103,7 @@ export default function App() {
           <div className="border-b border-slate-800/80 pb-2 mb-3 flex items-center justify-between">
             <span className="text-xs font-bold text-cyan-400 uppercase tracking-wider">
               {activeTab === 'forge' && 'TOKEN SYNTHESIZER // FORGE PIPELINE'}
+              {activeTab === 'withdraw' && 'ON-CHAIN WITHDRAWAL // GASLESS SETTLEMENT'}
               {activeTab === 'transfer' && 'ON-CHAIN TRANSFER ENGINE'}
               {activeTab === 'swap' && 'DEFI AMM SWAP ROUTER'}
               {activeTab === 'trade' && 'LIMIT & MARKET ORDERBOOK'}
@@ -103,6 +112,7 @@ export default function App() {
           </div>
 
           {activeTab === 'forge' && <ForgeSequence />}
+          {activeTab === 'withdraw' && <WithdrawPanel />}
           {activeTab === 'transfer' && <TokenTransfer />}
           {activeTab === 'swap' && <TokenSwap />}
           {activeTab === 'trade' && <TokenTrade />}

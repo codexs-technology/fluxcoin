@@ -1,61 +1,246 @@
+/**
+ * useWallet — React binding for the WalletManager singleton.
+ *
+ * This hook owns NO wallet state: it mirrors `walletManager` (the single source of
+ * truth) and exposes the connection actions. That is the fix for the previous
+ * version, which invented a `Math.random()` address whenever `window.ethereum` was
+ * missing and then displayed it as if a wallet were connected.
+ */
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { walletManager } from '../wallet/manager.js';
+import {
+  connectWithAppKit,
+  connectWithInjected,
+  connectWithSolana,
+  connectWithWalletConnect,
+  disconnectWallet as disconnectWalletAction,
+  restoreWalletSession,
+  switchWalletChain
+} from '../wallet/actions.js';
+import { installableWalletLinks } from '../wallet/eip6963.js';
+import { isAppKitConfigured } from '../wallet/appkit.js';
+import { truncateAddress } from '../wallet/format.js';
+import { ACTIVE_CHAIN, SUPPORTED_NETWORKS } from '../wallet/chains.js';
 import { useAppStore } from '../store/useAppStore';
-import { connectRealWallet, switchNetwork } from '../utils/walletConnection';
 
-export function useWallet() {
-  const connectedWallet = useAppStore((s) => s.connectedWallet);
-  const isConnectingWallet = useAppStore((s) => s.isConnectingWallet);
-  const setConnectedWallet = useAppStore((s) => s.setConnectedWallet);
-  const setIsConnectingWallet = useAppStore((s) => s.setIsConnectingWallet);
-  const disconnectWalletStore = useAppStore((s) => s.disconnectWallet);
-  const addLog = useAppStore((s) => s.addLog);
+/** Only the first mounted useWallet() instance performs the reload-restore. */
+let restoreStarted = false;
 
-  const connectWallet = async (providerType = 'MetaMask') => {
-    setIsConnectingWallet(true);
-    addLog(`[WALLET] Connecting to ${providerType} via Web3 RPC...`, 'info');
-
-    try {
-      if (typeof window !== 'undefined' && window.ethereum) {
-        const walletData = await connectRealWallet();
-        setConnectedWallet({
-          name: providerType,
-          address: walletData.address,
-          chainId: walletData.chainId,
-          networkName: walletData.networkName,
-          nativeBalance: walletData.nativeBalance,
-          isReal: true
-        });
-        addLog(`[WALLET] Connected: ${walletData.address} on ${walletData.networkName}`, 'success');
-      } else {
-        const randomHex = Math.random().toString(16).substring(2, 6);
-        const mockAddr = `0x${randomHex}...${Math.random().toString(16).substring(2, 6).toUpperCase()}`;
-        setConnectedWallet({
-          name: providerType,
-          address: mockAddr,
-          chainId: 1,
-          networkName: 'Ethereum Mainnet',
-          nativeBalance: '1.25',
-          isReal: false
-        });
-        addLog(`[WALLET] No Web3 provider detected in browser. Activated local session for ${mockAddr}`, 'warn');
-      }
-    } catch (err) {
-      addLog(`[WALLET_ERR] ${err.message || 'Connection cancelled by user'}`, 'error');
-    } finally {
-      setIsConnectingWallet(false);
-    }
-  };
-
-  const disconnectWallet = () => {
-    disconnectWalletStore();
-  };
-
+/** A wallet is only "connected" when the wallet itself returned an address. */
+function projectWallet(state) {
+  if (state.status !== 'connected' || !state.address) return null;
   return {
-    connectedWallet,
-    isConnectingWallet,
-    connectWallet,
-    disconnectWallet,
-    switchNetwork,
-    isConnected: !!connectedWallet
+    name: state.connectorName || 'Wallet',
+    connectorType: state.connectorType,
+    connectorId: state.connectorId,
+    address: state.address,
+    truncated: truncateAddress(state.address, 4, 4),
+    chainId: state.chainId,
+    networkName: state.networkName,
+    nativeBalance: state.nativeBalance,
+    evm: state.evm,
+    isReal: true, // kept for older components — the address always comes from the wallet
+    lastConnectedAt: state.lastConnectedAt
   };
 }
 
+export function useWallet() {
+  const [state, setState] = useState(() => walletManager.getState());
+  const [detected, setDetected] = useState(() => walletManager.getDetected());
+  const [error, setError] = useState(null);
+  const [pairingUri, setPairingUri] = useState(null);
+  const [isRestoring, setIsRestoring] = useState(true);
+
+  const setConnectedWallet = useAppStore((s) => s.setConnectedWallet);
+  const setIsConnectingWallet = useAppStore((s) => s.setIsConnectingWallet);
+
+  // --- 1. mirror the manager (address, chain, session) into React + the store ---
+  useEffect(() => {
+    const sync = (next) => {
+      setState(next);
+      setConnectedWallet(projectWallet(next));
+      setIsConnectingWallet(next.status === 'connecting');
+    };
+    sync(walletManager.getState());
+    return walletManager.subscribe(sync);
+  }, [setConnectedWallet, setIsConnectingWallet]);
+
+  // --- 2. discover the wallets that are ACTUALLY installed (EIP-6963) ----------
+  const refreshDetected = useCallback(async () => {
+    const result = await walletManager.discover();
+    setDetected(result);
+    return result;
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const run = async () => {
+      try {
+        const result = await walletManager.discover();
+        if (active) setDetected(result);
+      } catch (discoveryError) {
+        if (active) setError(discoveryError.message);
+      }
+    };
+    run();
+    // Extensions can inject late; re-scan whenever one announces itself.
+    const onAnnounce = () => run();
+    window.addEventListener('eip6963:announceProvider', onAnnounce);
+    return () => {
+      active = false;
+      window.removeEventListener('eip6963:announceProvider', onAnnounce);
+    };
+  }, []);
+
+  // --- 3. reconnect on page reload (injected eth_accounts / WC / AppKit) -------
+  useEffect(() => {
+    if (restoreStarted) {
+      setIsRestoring(false);
+      return undefined;
+    }
+    restoreStarted = true;
+    let active = true;
+    restoreWalletSession()
+      .catch(() => null)
+      .finally(() => {
+        if (active) setIsRestoring(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+  // --- actions -----------------------------------------------------------------
+
+  /**
+   * Connect an installed extension wallet. Accepts the discovered entry (preferred)
+   * or a name/id string; an unknown wallet throws instead of silently connecting to
+   * a different provider.
+   */
+  const connectWallet = useCallback(async (walletOrName) => {
+    setError(null);
+    try {
+      let entry = walletOrName;
+      if (typeof walletOrName === 'string' || !walletOrName?.provider) {
+        const needle = String(walletOrName || '').toLowerCase();
+        const found = (walletManager.getDetected().all || []).find(
+          (wallet) =>
+            wallet.id?.toLowerCase() === needle ||
+            wallet.brandId?.toLowerCase() === needle ||
+            wallet.name?.toLowerCase() === needle
+        );
+        if (!found) {
+          throw new Error(
+            `${walletOrName || 'That wallet'} is not installed in this browser. Install it (see the download list) or use WalletConnect / the QR code.`
+          );
+        }
+        entry = found;
+      }
+      if (entry.chain === 'solana' || entry.evm === false) return await connectWithSolana(entry);
+      return await connectWithInjected(entry);
+    } catch (connectError) {
+      setError(connectError.message || 'Wallet connection failed');
+      throw connectError;
+    }
+  }, []);
+
+  /** WalletConnect v2 in-app pairing — the QR payload arrives through `pairingUri`. */
+  const connectWalletConnect = useCallback(async (options = {}) => {
+    setError(null);
+    setPairingUri(null);
+    try {
+      return await connectWithWalletConnect({
+        ...options,
+        onUri: (uri) => {
+          setPairingUri(uri);
+          options.onUri?.(uri);
+        }
+      });
+    } catch (connectError) {
+      setError(connectError.message || 'WalletConnect pairing failed');
+      throw connectError;
+    } finally {
+      setPairingUri(null);
+    }
+  }, []);
+
+  /** Branded Reown AppKit modal (extensions + QR + deep links in one UI). */
+  const connectAppKit = useCallback(async () => {
+    setError(null);
+    try {
+      return await connectWithAppKit();
+    } catch (connectError) {
+      setError(connectError.message || 'AppKit could not be opened');
+      throw connectError;
+    }
+  }, []);
+
+  const disconnectWallet = useCallback(async () => {
+    setPairingUri(null);
+    setError(null);
+    await disconnectWalletAction();
+  }, []);
+
+  const switchNetwork = useCallback(async (chainId) => {
+    setError(null);
+    try {
+      return await switchWalletChain(chainId);
+    } catch (switchError) {
+      setError(switchError.message || 'Network switch failed');
+      throw switchError;
+    }
+  }, []);
+
+  const clearError = useCallback(() => setError(null), []);
+
+  const networkLabel = useMemo(
+    () => state.networkName || SUPPORTED_NETWORKS[state.chainId]?.name || `Chain ${state.chainId || '—'}`,
+    [state.chainId, state.networkName]
+  );
+
+  const wallet = useMemo(() => projectWallet(state), [state]);
+
+  return {
+    // --- connection state ---
+    wallet,
+    status: state.status,
+    address: state.address,
+    truncatedAddress: state.address ? truncateAddress(state.address, 4, 4) : '',
+    chainId: state.chainId,
+    networkName: networkLabel,
+    nativeBalance: state.nativeBalance,
+    connectorName: state.connectorName,
+    connectorType: state.connectorType,
+    isConnected: state.status === 'connected' && Boolean(state.address),
+    isConnecting: state.status === 'connecting',
+    isRestoring,
+    isEvm: state.evm !== false,
+    error: error || state.error,
+    clearError,
+
+    // --- discovery ---
+    wallets: detected,
+    injectedWallets: detected.evm || [],
+    solanaWallets: detected.solana || [],
+    hasInjectedWallet: (detected.evm || []).length > 0,
+    installableWallets: installableWalletLinks(),
+    appKitAvailable: isAppKitConfigured(),
+    refreshDetected,
+
+    // --- actions ---
+    connectWallet,
+    connectWalletConnect,
+    connectAppKit,
+    disconnectWallet,
+    switchNetwork,
+
+    // --- WalletConnect pairing (drives the QR modal) ---
+    pairingUri,
+    chains: Object.values(SUPPORTED_NETWORKS),
+    activeChain: ACTIVE_CHAIN,
+
+    // --- backwards compatible alias (old components read `connectedWallet`) ---
+    connectedWallet: wallet
+  };
+}
+
+export default useWallet;

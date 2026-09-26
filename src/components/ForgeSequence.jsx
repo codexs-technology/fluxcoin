@@ -1,7 +1,7 @@
 import React from 'react';
 import { useAppStore } from '../store/useAppStore';
+import { useCoinBalance } from '../hooks/useCoinBalance';
 import { Token3DCanvas } from './Token3DCanvas';
-import { calculateActivationFee } from '../utils/feeCalculator';
 
 export function ForgeSequence() {
   const {
@@ -9,18 +9,26 @@ export function ForgeSequence() {
     customTokenName,
     mintQuantity,
     setMintQuantity,
-    selectedTier,
-    telemetry,
     isForging,
     forgeProgress,
+    forgeError,
     triggerTokenForge
   } = useAppStore();
+  const { earn, isSignedIn, availableTokens, tokenSymbol } = useCoinBalance();
 
-  const tokenSymbol = customTokenName.trim()
+  const tokenSymbolLabel = customTokenName.trim()
     ? customTokenName.toUpperCase().slice(0, 8)
     : selectedToken.symbol;
 
-  const fee = calculateActivationFee(selectedTier.id, mintQuantity, telemetry.gasPressure);
+  // "Generate" credits the site balance through POST /api/earn (rate-limited and
+  // capped server-side). Nothing is minted on-chain here — that happens at
+  // withdrawal time, gas-free.
+  const handleGenerate = () => {
+    if (!isSignedIn) {
+      return triggerTokenForge(null);
+    }
+    return triggerTokenForge(() => earn(mintQuantity));
+  };
 
   return (
     <div className="space-y-4">
@@ -44,7 +52,7 @@ export function ForgeSequence() {
             className="w-full bg-[#070d14] border border-cyan-500/30 focus:border-cyan-400 rounded-md py-2.5 px-3 text-lg text-white font-mono focus:outline-none focus:ring-1 focus:ring-cyan-400 disabled:opacity-50 tracking-wider"
           />
           <div className="absolute right-3 top-3 text-xs font-mono text-cyan-400 font-bold">
-            {tokenSymbol}
+            {tokenSymbolLabel}
           </div>
         </div>
 
@@ -63,21 +71,27 @@ export function ForgeSequence() {
         </div>
       </div>
 
-      {/* Activation Fee Breakdown */}
+      {/* Zero-fee breakdown — the only real numbers are the on-site balance and the 0 gas cost */}
       <div className="p-3 rounded-md bg-slate-900/60 border border-slate-800 space-y-1.5 text-xs font-mono">
         <div className="flex justify-between text-slate-400">
-          <span>TIER BASE ({selectedTier.name})</span>
-          <span className="text-slate-200">${selectedTier.fee.toFixed(2)}</span>
+          <span>ASSET PRESET (visual)</span>
+          <span className="text-slate-200">{selectedToken.symbol}</span>
         </div>
         <div className="flex justify-between text-slate-400">
-          <span>DYNAMIC GAS ADJ ({telemetry.gasPressure} Gwei)</span>
-          <span className="text-slate-200">
-            +${((telemetry.gasPressure / 25) * (selectedTier.fee * 0.08)).toFixed(2)}
-          </span>
+          <span>CREDITED AS</span>
+          <span className="text-slate-200">{tokenSymbol} (site balance)</span>
+        </div>
+        <div className="flex justify-between text-slate-400">
+          <span>GAS COST</span>
+          <span className="text-emerald-400">0.00 — sponsored by the project</span>
+        </div>
+        <div className="flex justify-between text-slate-400">
+          <span>YOUR EARNED BALANCE</span>
+          <span className="text-cyan-300">{availableTokens} {tokenSymbol}</span>
         </div>
         <div className="border-t border-slate-800 pt-1.5 flex justify-between font-bold text-sm">
-          <span className="text-cyan-300">TOTAL ACTIVATION FEE</span>
-          <span className="text-emerald-400 font-bold">${fee.toFixed(2)} USD</span>
+          <span className="text-cyan-300">TOTAL FEE</span>
+          <span className="text-emerald-400 font-bold">$0.00 USD</span>
         </div>
       </div>
 
@@ -97,9 +111,15 @@ export function ForgeSequence() {
         </div>
       )}
 
+      {forgeError && (
+        <div className="p-2 rounded bg-rose-950/40 border border-rose-500/40 text-[10px] font-mono text-rose-300 leading-snug">
+          {forgeError}
+        </div>
+      )}
+
       {/* Generate Tokens Action Button */}
       <button
-        onClick={triggerTokenForge}
+        onClick={handleGenerate}
         disabled={isForging || !mintQuantity || Number(mintQuantity) <= 0}
         className={`w-full py-3.5 px-4 rounded-md font-mono font-bold text-sm tracking-wider uppercase transition-all duration-200 shadow-glow-cyan ${
           isForging
@@ -107,11 +127,13 @@ export function ForgeSequence() {
             : 'bg-gradient-to-r from-cyan-500/20 via-cyan-400/30 to-emerald-500/20 hover:from-cyan-500/30 hover:to-emerald-500/30 text-white border border-cyan-400 hover:shadow-[0_0_25px_rgba(0,240,255,0.4)]'
         }`}
       >
-        {isForging ? 'COMPUTING SIMULATION MINT...' : `GENERATE ${tokenSymbol} TOKENS`}
+        {isForging ? 'CREDITING SITE BALANCE…' : `GENERATE ${mintQuantity || 0} ${tokenSymbol}`}
       </button>
 
-      <div className="text-[10px] text-center font-mono text-slate-500">
-        * Non-functional simulation. Generates mock ledger cryptographic receipts.
+      <div className="text-[10px] text-center font-mono text-slate-500 leading-snug">
+        {isSignedIn
+          ? `Earnings are credited to your signed-in wallet on ${selectedToken.symbol} preset ${tokenSymbolLabel}. Withdraw them as real ERC-20 FLUX with 0 gas from the withdrawal tab.`
+          : 'Sign in with your wallet (or connect one) to credit earnings to your real address.'}
       </div>
     </div>
   );

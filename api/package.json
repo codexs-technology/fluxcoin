@@ -1,0 +1,20 @@
+{
+  "name": "fluxcoin-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "FluxCoin backend: wallet auth, site balance ledger, gasless (sponsored) FLUX withdrawals",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test:flow": "node scripts/flow-test.mjs"
+  },
+  "dependencies": {
+    "@gelatonetwork/relay-sdk": "^5.7.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "ethers": "^6.17.0",
+    "express": "^4.21.2"
+  }
+}

@@ -1,15 +1,28 @@
+/**
+ * Display-only data.
+ *
+ * IMPORTANT: nothing in this file is ever rendered as a wallet address, a balance
+ * or a transaction. Balances/addresses come from `src/wallet/*` (real provider
+ * reads) and ledger rows come from `src/api/client.js` (real backend records).
+ *
+ * The old `walletProviders` array (a hardcoded list that made every button connect
+ * the same random provider) is gone — installed wallets are discovered via
+ * EIP-6963 in `src/wallet/eip6963.js`.
+ */
+
+/** Visual presets for the forge animation. FLUX is the real, withdrawable coin. */
 export const tokens = [
-  { id: 'usdt', name: 'USDT', symbol: 'USDT', decimals: 6, type: 'ERC-20', color: '#26a17b' },
-  { id: 'eth', name: 'Ethereum', symbol: 'ETH', decimals: 18, type: 'Native', color: '#627eea' },
-  { id: 'wbtc', name: 'Bitcoin Wrapped', symbol: 'WBTC', decimals: 8, type: 'BRC-20', color: '#f7931a' }
+  { id: 'flux', name: 'FluxCoin', symbol: 'FLUX', decimals: 18, type: 'ERC-20', color: '#00f0ff', live: true },
+  { id: 'usdt', name: 'Tether USD', symbol: 'USDT', decimals: 6, type: 'ERC-20', color: '#26a17b', live: false },
+  { id: 'eth', name: 'Ethereum', symbol: 'ETH', decimals: 18, type: 'Native', color: '#627eea', live: false },
+  { id: 'wbtc', name: 'Wrapped BTC', symbol: 'WBTC', decimals: 8, type: 'ERC-20', color: '#f7931a', live: false }
 ];
 
-export const feeTiers = [
-  { id: 'retail', name: 'Retail', fee: 50, min: 1000, desc: 'Standard mempool prioritization' },
-  { id: 'pro', name: 'Pro', fee: 250, min: 5000, desc: 'Accelerated flashbots relay routing' },
-  { id: 'institutional', name: 'Institutional', fee: 12000, min: 100000, desc: 'Private validator enclave bypass' }
-];
-
+/**
+ * Demo telemetry. These numbers are simulated for the dashboard look and are
+ * labelled as such in the UI (`NetworkTelemetry.jsx`) — block height and balances
+ * shown elsewhere come from the real chain/API.
+ */
 export const initialTelemetryData = {
   hashRate: 245.67,
   mempoolLoad: 1245,
@@ -19,12 +32,3 @@ export const initialTelemetryData = {
   currentBlock: 18245672,
   settlementStatus: 'Idle'
 };
-
-export const walletProviders = [
-  { id: 'metamask', name: 'MetaMask', icon: '🦊' },
-  { id: 'trust', name: 'Trust Wallet', icon: '🛡️' },
-  { id: 'binance', name: 'Binance Wallet', icon: '🟡' },
-  { id: 'walletconnect', name: 'WalletConnect', icon: '⚡' },
-  { id: 'coinbase', name: 'Coinbase', icon: '🔵' },
-  { id: 'phantom', name: 'Phantom', icon: '👻' },
-];

@@ -1,0 +1,26 @@
+{
+  "name": "fluxcoin-contracts",
+  "version": "1.0.0",
+  "private": true,
+  "description": "FluxCoin (FLUX) ERC-20 token + claim faucet used for gasless withdrawals (ERC-4337 / ERC-2771)",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "node": "hardhat node",
+    "deploy:local": "hardhat run scripts/deploy.js --network localhost",
+    "deploy:sepolia": "hardhat run scripts/deploy.js --network sepolia",
+    "deploy:bsc": "hardhat run scripts/deploy.js --network bsc",
+    "deploy:polygon": "hardhat run scripts/deploy.js --network polygon",
+    "deploy:mainnet": "hardhat run scripts/deploy.js --network mainnet",
+    "grant:minter": "hardhat run scripts/grantMinter.js --network sepolia",
+    "liquidity:uniswap": "hardhat run scripts/addLiquidity.js --network sepolia"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "hardhat": "^2.22.17"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "5.6.1",
+    "dotenv": "^16.4.7"
+  }
+}

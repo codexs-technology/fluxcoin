@@ -12,10 +12,13 @@ export function NetworkTelemetry() {
         <span className="text-xs font-bold text-cyan-400/90 tracking-wider">
           NETWORK TELEMETRY
         </span>
-        <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-950/60 text-emerald-400 border border-emerald-500/40 flex items-center space-x-1">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-          <span>LIVE</span>
+        <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800/80 text-slate-400 border border-slate-700">
+          DEMO GAUGES
         </span>
+      </div>
+      <div className="text-[10px] font-mono text-slate-500 leading-snug">
+        These gauges are cosmetic dashboard numbers. Real values (wallet address, FLUX balances, gasless mode, tx hashes)
+        are shown in the wallet, balance and ledger panels.
       </div>
 
       {/* Grid of Key Telemetry metrics */}

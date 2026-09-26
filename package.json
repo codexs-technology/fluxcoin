@@ -9,9 +9,14 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@ethersproject/sha2": "^5.8.0",
+    "@reown/appkit": "^1.8.24",
+    "@reown/appkit-adapter-ethers": "^1.8.24",
+    "@walletconnect/ethereum-provider": "^2.25.0",
     "canvas-confetti": "^1.9.4",
     "ethers": "^6.17.0",
     "lucide-react": "^1.16.0",
+    "qrcode": "^1.5.4",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "three": "^0.180.0",
