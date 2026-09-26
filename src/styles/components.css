@@ -1,0 +1,49 @@
+.terminal-glow {
+  text-shadow: 0 0 8px rgba(0, 240, 255, 0.6);
+}
+
+.terminal-green-glow {
+  text-shadow: 0 0 8px rgba(0, 255, 136, 0.6);
+}
+
+.cyber-panel {
+  background: rgba(9, 14, 21, 0.88);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(0, 240, 255, 0.16);
+  position: relative;
+}
+
+.cyber-panel::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: 12px;
+  width: 40px;
+  height: 2px;
+  background: #00f0ff;
+  box-shadow: 0 0 8px #00f0ff;
+}
+
+.cyber-panel::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  right: 12px;
+  width: 40px;
+  height: 2px;
+  background: #00ff88;
+  box-shadow: 0 0 8px #00ff88;
+}
+
+.cyber-btn-primary {
+  background: linear-gradient(135deg, rgba(0, 240, 255, 0.2) 0%, rgba(0, 255, 136, 0.2) 100%);
+  border: 1px solid #00f0ff;
+  color: #00f0ff;
+  transition: all 0.2s ease;
+}
+
+.cyber-btn-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(0, 240, 255, 0.4) 0%, rgba(0, 255, 136, 0.4) 100%);
+  box-shadow: 0 0 15px rgba(0, 240, 255, 0.5);
+  color: #ffffff;
+}
