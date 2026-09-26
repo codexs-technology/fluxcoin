@@ -72,27 +72,15 @@ export const useAppStore = create((set, get) => ({
     set({ active3DMode: mode });
   },
 
-  connectWallet: (walletName) => {
-    set({ isConnectingWallet: true });
-    sound.playBeep();
-    setTimeout(() => {
-      const randomHex = Math.random().toString(16).substring(2, 6);
-      const mockAddr = `0x${randomHex}...${Math.random().toString(16).substring(2, 6).toUpperCase()}`;
-      set({
-        connectedWallet: { name: walletName, address: mockAddr },
-        isConnectingWallet: false
-      });
-      get().addLog(`[WALLET] Authenticated ${walletName} (${mockAddr}) via Web3Provider.`, 'success');
-      sound.playClick();
-    }, 700);
-  },
+  setConnectedWallet: (wallet) => set({ connectedWallet: wallet }),
+  setIsConnectingWallet: (status) => set({ isConnectingWallet: status }),
 
   disconnectWallet: () => {
     sound.playClick();
     const prev = get().connectedWallet;
     set({ connectedWallet: null });
     if (prev) {
-      get().addLog(`[WALLET] Disconnected ${prev.name}.`, 'warn');
+      get().addLog(`[WALLET] Disconnected ${prev.name || prev.address}.`, 'warn');
     }
   },
 

@@ -19,8 +19,14 @@ export function WalletConnect() {
             <div className="flex items-center space-x-1.5">
               <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_6px_#00ff88]" />
               <span className="text-xs font-mono text-cyan-300 font-semibold">{connectedWallet.name}</span>
+              {connectedWallet.isReal && (
+                <span className="text-[9px] bg-emerald-950 text-emerald-400 px-1 py-0.2 rounded border border-emerald-500/40">
+                  WEB3 LIVE
+                </span>
+              )}
             </div>
-            <div className="text-xs font-mono text-slate-400 mt-0.5">{connectedWallet.address}</div>
+            <div className="text-xs font-mono text-slate-300 mt-0.5">{connectedWallet.address}</div>
+            <div className="text-[10px] font-mono text-slate-500">{connectedWallet.networkName} • {connectedWallet.nativeBalance} ETH</div>
           </div>
           <button
             onClick={disconnectWallet}

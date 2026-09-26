@@ -1,36 +1,44 @@
-# TokenForge 3D - Token Generation & Settlement Terminal
+﻿# FluxCoin - Flash Token Blockchain Platform
 
-An interactive 3D simulation of a token generation & settlement terminal designed with a dark, futuristic cyberpunk aesthetic.
-
-## Visual & Architecture Highlights
-
-- **Visual Design**: Dark-themed terminal aesthetic with glowing cyan (`#00f0ff`) and emerald green (`#00ff88`) neon accents, scanline overlays, cyber borders, and monospace telemetry typography (`JetBrains Mono`).
-- **Interactive 3D Engine**: Built with Three.js rendering a dynamic 3D token coin with beveled metallic rings, particle field, and standard/wireframe toggle controls.
-- **Client-Side Simulation**: Zero external API dependencies or real blockchain vulnerabilities; includes synthesized sound effects (synthesizer Web Audio API) and confetti particle cascades.
+A high-performance Web3 platform for creating, transferring, swapping, and trading **Flash Tokens** with full blockchain smart contract integration.
 
 ## Key Features
 
-### 1. Left Panel (Configuration Matrix)
-- **Token Selection**: USDT (ERC-20), Ethereum (Native), Bitcoin Wrapped (BRC-20) with custom token name override.
-- **Fee Tiers**: Retail ($50), Pro ($250), and Institutional ($12,000) with dynamic network gas scaling.
-- **Wallet Connection Simulation**: Supports MetaMask, Trust Wallet, Binance Wallet, WalletConnect, Coinbase, and Phantom with ECDSA public key generation.
+1. **Smart Contracts (`/src/contracts/FlashToken.sol`)**:
+   - Built on ERC-20 with ERC20Permit & Ownable.
+   - **Flash Minting**: Authorized flash minting function with protocol event logs.
+   - **Protocol Fee Routing**: 0.05% fee automatically deducted and routed on transfers.
+   - **Token Burning**: Deflationary `burn` mechanism for supply management.
 
-### 2. Center Panel (Synthesizer // Forge Pipeline)
-- **3D Token Visualizer**: Live Three.js canvas featuring floating rotating token mesh and particle field.
-- **Allocation & Mint Inputs**: Adjustable mint quantity with quick preset buttons (+1k, +10k, +100k, +1M).
-- **Dynamic Fee Calculator**: Computes activation fees factoring in selected tier, volume, and simulated network gas pressure.
-- **Simulated Forge Sequence**: Multi-stage forging animation with progress bar, audio feedback, confetti, and cryptographic TX receipt generation.
+2. **Real Web3 Wallet Integration (`/src/utils/walletConnection.js`)**:
+   - Native integration with `window.ethereum` (MetaMask, Trust Wallet, Coinbase, Binance Wallet, etc.) using `ethers.js` v6.
+   - Live network detection (Ethereum Mainnet, Sepolia Testnet, Polygon, BSC) and auto-switching.
+   - Dynamic real balance retrieval and transaction broadcast with receipt tracking.
 
-### 3. Right Panel (Network Telemetry & Terminal)
-- **Real-Time Telemetry Dashboard**: Live fluctuating metrics for Hash Rate (TH/s), Mempool Load (tx), Throughput (TPS), Peer Mesh (peers), Gas Pressure (gwei), Current Block #, and Settlement Status.
-- **Live Terminal Output**: Monospace boot sequence, logging each stage of wallet authentication, token forging, and block sealing with auto-scrolling STDOUT.
-- **Critical Protocol Notice**: Explicit safety disclaimer warning users that no real blockchain is touched.
+3. **Transfer Engine (`/src/components/TokenTransfer.jsx`)**:
+   - Direct on-chain ERC-20 transfer with gas verification and automated ledger auditing.
+   - Live Etherscan link generation for confirmed transactions.
 
-### 4. Bottom Section (Disperse Pipeline & Audit Trail)
-- **Withdrawal Queue**: Live queue with ETA countdowns, destination hashes, and verification statuses.
-- **Operation Ledger Table**: Immutable audit trail displaying Time, Operation, Asset, Value, Fee, TX Hash, and Confirmed status.
+4. **DEX Swapping (`/src/components/TokenSwap.jsx` & `/src/utils/dexIntegration.js`)**:
+   - Uniswap V2 Router integration (`swapExactTokensForTokens`) for liquidity pools.
+   - Real-time quote estimations between FLASH, WETH, and USDT.
 
-## Development & Build
+5. **Orderbook Trading (`/src/components/TokenTrade.jsx`)**:
+   - Limit & Market order execution interface with live order placement.
+
+6. **Interactive 3D Engine & Cyber Aesthetic**:
+   - Three.js 3D coin visualizer with beveled edge geometry, wireframe/mesh modes, and ambient particle field.
+   - Live telemetry monitors (Hash Rate, Mempool load, TPS, Gas pressure, Block number).
+
+## Environment Variables (.env)
+
+```env
+VITE_TOKEN_ADDRESS=0x6B175474E89094C44Da98b954EedeAC495271d0F
+VITE_ROUTER_ADDRESS=0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D
+VITE_NETWORK_ID=1
+```
+
+## Build & Deployment
 
 ```bash
 # Install dependencies
