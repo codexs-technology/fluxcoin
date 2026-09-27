@@ -9,12 +9,13 @@ export function ProtocolNotice() {
       </div>
       <p className="text-slate-300 leading-snug">
         Wallet connections are real (EIP-6963 extensions, WalletConnect v2 QR, Reown AppKit). Generated coins are credited
-        to your <strong className="text-emerald-300 font-semibold">site balance</strong> by the backend and withdrawn as
-        real ERC-20 <strong className="text-emerald-300 font-semibold">FLUX</strong> (18 decimals) to your own address.
+        to your <strong className="text-emerald-300 font-semibold">site balance</strong> by the Cloudflare Worker API and
+        withdrawn as real ERC-20 <strong className="text-emerald-300 font-semibold">FLUX</strong> (18 decimals) to your own
+        address.
       </p>
       <p className="text-slate-400 font-medium pt-0.5">
-        &gt; Withdrawals are gas-sponsored by the project (Gelato Relay / Biconomy Paymaster / backend mint) — you pay 0
-        gas. Transfers and DEX swaps are normal signed transactions and do cost network gas.
+        &gt; Withdrawals are gas-sponsored by the project (sponsored ERC-4337 UserOperation or a project-wallet mint) — you
+        pay 0 gas. Transfers and DEX swaps are normal signed transactions and do cost network gas.
       </p>
     </div>
   );

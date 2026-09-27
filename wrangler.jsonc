@@ -1,0 +1,66 @@
+{
+  "$schema": "api/node_modules/wrangler/config-schema.json",
+  // ---------------------------------------------------------------------------
+  // FluxCoin API — Cloudflare Worker.
+  //
+  // This file lives at the REPOSITORY ROOT on purpose: the Cloudflare build is
+  // configured with root directory `/` and runs `npx wrangler deploy`, so
+  // Wrangler picks up this config and bundles `api/src/index.ts`.
+  //
+  // It intentionally has NO `assets` binding: the Worker serves JSON under
+  // /api/* only and answers 404 for everything else. The frontend is served by
+  // the Cloudflare Pages project (fluxcoin.pages.dev) — see README.md.
+  // ---------------------------------------------------------------------------
+  "name": "fluxcoin",
+  "main": "api/src/index.ts",
+  "compatibility_date": "2026-09-27",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "vars": {
+    // Frontend origins allowed to call the API (comma separated, or "*").
+    "CORS_ORIGINS": "https://fluxcoin.pages.dev,http://localhost:5173,http://127.0.0.1:5173",
+    "SITE_DOMAIN": "fluxcoin.pages.dev",
+    "SITE_URL": "https://fluxcoin.pages.dev",
+
+    "CHAIN_ID": "11155111",
+    "RPC_URL": "https://rpc.chainlist.io/sepolia",
+    // Printed by `contracts/scripts/deploy.js` — set the real addresses here.
+    "TOKEN_ADDRESS": "",
+    "FAUCET_ADDRESS": "",
+
+    // auto | paymaster | server | dry-run
+    "GASLESS_MODE": "auto",
+    // ERC-4337 bundler + paymaster URL (optional, enables paymaster-4337).
+    "PAYMASTER_URL": "",
+
+    // Keep true until a sponsor key / paymaster is configured: withdrawals are
+    // then validated and booked as SIMULATED instead of failing.
+    "ALLOW_DRY_RUN": "true",
+
+    "EARN_MIN_TOKENS": "1",
+    "EARN_MAX_TOKENS": "100000",
+    "EARN_COOLDOWN_SECONDS": "20",
+    "EARN_DAILY_CAP_TOKENS": "500000",
+
+    "WITHDRAW_MIN_TOKENS": "1",
+    "WITHDRAW_MAX_TOKENS": "100000",
+    "WITHDRAW_DAILY_CAP_TOKENS": "1000000",
+
+    "SESSION_TTL_MINUTES": "1440",
+    "AUTH_NONCE_TTL_SECONDS": "300"
+  },
+  // Secrets (never committed):
+  //   npx wrangler secret put SESSION_SECRET     # long random string
+  //   npx wrangler secret put MINTER_PRIVATE_KEY # sponsor wallet (MINTER_ROLE)
+  //
+  // KV namespace for durable, non-ephemeral app storage.
+  // Create it with:
+  //   npx wrangler kv namespace create STORAGE --config wrangler.jsonc
+  // Then replace the empty id with the returned namespace id.
+  "kv_namespaces": [
+    {
+      "binding": "STORAGE",
+      "id": ""
+    }
+  ]
+}

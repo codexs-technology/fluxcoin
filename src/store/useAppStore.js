@@ -155,7 +155,7 @@ export const useAppStore = create((set, get) => ({
    * "Generate coins" (the forge button).
    *
    * The credited amount comes ONLY from the backend: `earnFn` is
-   * `POST /api/earn` (see useCoinBalance.earn), which rate-limits and caps the
+   * `POST /api/forge` (see useCoinBalance.earn), which rate-limits and caps the
    * claim. The progress bar below is pure animation — it never fabricates a
    * transaction hash or a destination address like the old implementation did.
    *

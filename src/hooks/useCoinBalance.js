@@ -4,22 +4,25 @@
  *
  * Flow implemented here (all values come from the backend, never from the browser):
  *  1. `signIn()`   -> SIWE-style signature by the connected wallet (POST /api/auth/*)
- *  2. `earn()`     -> POST /api/earn credits the on-site balance
+ *  2. `earn()`     -> POST /api/forge credits the on-site balance
  *  3. `withdraw()` -> POST /api/withdraw validates "never more than the site balance",
- *                     reserves it, and mints real FLUX to the connected address via
- *                     whichever GASLESS route the backend has configured (the user
- *                     pays 0 gas — see src/wallet/gasless.js and api/src/services/*).
+ *                     reserves it, and settles real FLUX to the connected address via
+ *                     whichever GASLESS route the Worker resolved (the user pays 0 gas —
+ *                     see src/wallet/gasless.js and api/src/withdraw.ts).
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import {
+  API_BASE,
   checkApiHealth,
   claimEarn,
+  clearApiSession,
   ensureSession,
   fetchBalance,
   fetchLedger,
   fetchWithdrawConfig,
-  hasValidSession
+  hasValidSession,
+  loginWithWallet
 } from '../api/client.js';
 import { performGaslessWithdrawal } from '../wallet/gasless.js';
 import { readTokenBalance } from '../wallet/token.js';
@@ -39,11 +42,15 @@ export function useCoinBalance() {
   const addLog = useAppStore((s) => s.addLog);
 
   const [apiOnline, setApiOnline] = useState(null);
+  /** Last health probe: { online, base, latencyMs, reason, error, payload }. */
+  const [backend, setBackend] = useState(null);
   const [isSignedIn, setIsSignedIn] = useState(() => hasValidSession());
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [withdrawPhase, setWithdrawPhase] = useState(null);
   const [lastWithdrawal, setLastWithdrawal] = useState(null);
+  /** Wallet (lowercased) that must not be auto-signed-in again (manual sign-out / refusal). */
+  const autoSignInBlock = useRef(null);
 
   const tokenHint = useMemo(() => tokenConfigHint(), []);
 
@@ -66,10 +73,13 @@ export function useCoinBalance() {
     setIsLoading(true);
     setError(null);
     try {
+      // Health first: this is what decides between "backend offline" and a real
+      // API error, and the message shown to the user comes from src/lib/api.js.
       const health = await checkApiHealth();
       setApiOnline(health.online);
+      setBackend(health);
       if (!health.online) {
-        setError(`Backend unreachable (${health.error}). Start it with "npm run dev" inside /api.`);
+        setError(health.error || `The FluxCoin API at ${health.base} is not reachable.`);
         return null;
       }
 
@@ -90,6 +100,10 @@ export function useCoinBalance() {
       if (requestError.status === 401) {
         setIsSignedIn(false);
         setError('Session expired — sign in again with your wallet to load your balance.');
+      } else if (requestError.offline || requestError.notApi) {
+        setApiOnline(false);
+        setBackend({ online: false, base: API_BASE, error: requestError.message, reason: requestError.notApi ? 'not-fluxcoin-api' : 'unreachable' });
+        setError(requestError.message);
       } else {
         setError(requestError.message || 'Could not load your balance');
       }
@@ -106,8 +120,12 @@ export function useCoinBalance() {
     setError(null);
     try {
       const session = await ensureSession();
+      autoSignInBlock.current = null;
       setIsSignedIn(true);
-      addLog(`[AUTH] Signed in as ${address} (signature verified by the backend).`, 'success');
+      addLog(
+        `[AUTH] Signed in as ${address}${session?.signatureVerified ? ' (signature verified by the API)' : ''}.`,
+        'success'
+      );
       await refresh();
       return session;
     } catch (authError) {
@@ -117,6 +135,16 @@ export function useCoinBalance() {
       setIsLoading(false);
     }
   }, [addLog, address, refresh]);
+  /** Signs out and clears the session from localStorage. */
+  const signOut = useCallback(() => {
+    clearApiSession();
+    autoSignInBlock.current = address ? address.toLowerCase() : null;
+    setIsSignedIn(false);
+    setSiteBalance(null);
+    setLedger([]);
+    addLog(`[AUTH] Signed out of FluxCoin.`, 'info');
+  }, [addLog, address, setLedger, setSiteBalance]);
+
   /** Generates (earns) coins into the site balance. Server-side limits apply. */
   const earn = useCallback(
     async (amount) => {
@@ -225,6 +253,43 @@ export function useCoinBalance() {
     refresh().catch(() => null);
   }, [refresh]);
 
+  /**
+   * Auto sign-in: as soon as a wallet is connected and the Worker answers
+   * /api/health, a session is opened once for that address (a stored token is
+   * reused, otherwise the wallet signs the login message). The earned balance
+   * therefore loads as soon as a wallet exists instead of waiting for a click.
+   * Failures are surfaced in the error banner, never thrown at the user.
+   */
+  useEffect(() => {
+    const key = address ? address.toLowerCase() : null;
+    // A different wallet clears an earlier block (manual sign-out / refusal).
+    if (autoSignInBlock.current && autoSignInBlock.current !== key) autoSignInBlock.current = null;
+    if (!key || isSignedIn || apiOnline !== true) return;
+    if (autoSignInBlock.current === key) return;
+
+    let cancelled = false;
+    loginWithWallet()
+      .then((session) => {
+        if (cancelled) return;
+        setIsSignedIn(true);
+        addLog(
+          `[AUTH] Session opened for ${address}${session?.signatureVerified ? ' (signature verified by the API)' : ''}.`,
+          'info'
+        );
+        refresh().catch(() => null);
+      })
+      .catch((authError) => {
+        if (cancelled) return;
+        // Block this wallet until the user asks again, so we never nag.
+        autoSignInBlock.current = key;
+        setError(authError.message || 'The wallet did not complete the sign-in');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [address, apiOnline, isSignedIn, addLog, refresh]);
+
   useEffect(() => {
     if (!address) return;
     refreshOnchain().catch(() => null);
@@ -257,6 +322,9 @@ export function useCoinBalance() {
 
     // status
     apiOnline,
+    /** Last health probe: { online, base, latencyMs, reason, error }. */
+    backend,
+    apiBase: API_BASE,
     isSignedIn,
     isLoading,
     error,
@@ -266,6 +334,7 @@ export function useCoinBalance() {
 
     // actions
     signIn,
+    signOut,
     earn,
     withdraw,
     refresh,

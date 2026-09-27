@@ -5,10 +5,10 @@
  *   1. the connected wallet address is fixed as the destination (the API rejects a
  *      mismatch between the signed session address and the withdrawal address);
  *   2. the amount is validated against the EARNED site balance here and, again,
- *      server-side in api/src/services/withdrawal.js (`INSUFFICIENT_SITE_BALANCE`);
- *   3. the backend mints real ERC-20 FLUX to that address through a GASLESS route
- *      (server-sponsored mint, Gelato Relay ERC-2771 or a Biconomy paymaster
- *      UserOperation) — the user pays 0 gas in every mode.
+ *      server-side in the Worker (api/src/withdraw.ts — `INSUFFICIENT_SITE_BALANCE`);
+ *   3. the Worker settles the withdrawal through a GASLESS route (a sponsored
+ *      ERC-4337 UserOperation or a project wallet mint/transfer) — the user pays
+ *      0 gas in every mode.
  */
 import React, { useState } from 'react';
 import { useCoinBalance } from '../hooks/useCoinBalance';
@@ -200,10 +200,10 @@ export function WithdrawPanel() {
           {tokenHint && <div className="text-[10px] text-amber-300/80 leading-snug">{tokenHint}</div>}
 
           <div className="text-[10px] text-slate-500 leading-snug">
-            The project pays the gas: the API holds the Paymaster / Relayer credentials
-            (<span className="text-slate-400">GELATO_RELAY_API_KEY</span> or{' '}
-            <span className="text-slate-400">BICONOMY_PAYMASTER_URL</span> in api/.env). Nothing here can make you spend
-            gas, and the backend refuses any amount above your earned balance.
+            The project pays the gas: the Worker holds the sponsor credentials
+            (<span className="text-slate-400">MINTER_PRIVATE_KEY</span> or{' '}
+            <span className="text-slate-400">PAYMASTER_URL</span> as Wrangler secrets). Nothing here can make you
+            spend gas, and the backend refuses any amount above your earned balance.
           </div>
         </form>
       )}

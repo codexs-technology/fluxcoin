@@ -15,6 +15,13 @@ Thumbs.db
 api/.env
 contracts/.env
 .env.contracts.json
+# Wrangler local secrets (api/.dev.vars) — never commit
+.dev.vars
+api/.dev.vars
+# Wrangler local state + bundles
+.wrangler/
+api/.wrangler/
+api/dist/
 
 # --- build & test output ----------------------------------------------------
 artifacts/

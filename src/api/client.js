@@ -1,161 +1,186 @@
 /**
  * Frontend API client.
  *
- * The site's *earned* balance and the withdrawal authorizations live on the
- * backend (see /api). This module talks to it and manages the wallet session
- * token: the user proves ownership by signing a message with their real wallet,
- * nothing is ever trusted from the browser.
+ * All transport lives in src/lib/api.js (single base URL, single error
+ * classification). This module owns the *protocol*: the endpoints the FluxCoin
+ * Worker exposes, the wallet sign-in handshake and the session storage.
+ *
+ * Session storage (localStorage):
+ *   fluxcoin_session           -> HMAC session token issued by the Worker
+ *   fluxcoin_session_address   -> wallet the token belongs to
+ *   fluxcoin_wallet            -> last connected wallet (UI re-hydration)
  */
 import { walletManager } from '../wallet/manager.js';
+import {
+  API_BASE,
+  apiFetch,
+  checkBackend,
+  clearStoredSession as clearApiSession,
+  describeBackendIssue,
+  getStoredSessionAddress,
+  getStoredToken,
+  getStoredWalletAddress,
+  storeSession
+} from '../lib/api.js';
 
-const env = (typeof import.meta !== 'undefined' && import.meta.env) || {};
-export const API_BASE = (env.VITE_API_URL || 'http://localhost:8787').replace(/\/$/, '');
-const TOKEN_KEY = 'fluxcoin.api.session.v1';
+export { API_BASE, getStoredWalletAddress };
 
 export function getSessionToken() {
-  try {
-    const raw = window.localStorage.getItem(TOKEN_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed?.token || (parsed.expiresAt && parsed.expiresAt < Date.now())) return null;
-    return parsed.token;
-  } catch {
-    return null;
-  }
+  return getStoredToken();
 }
 
 export function getSessionAddress() {
+  return getStoredSessionAddress();
+}
+
+export { clearApiSession, describeBackendIssue };
+
+function storeApiSession(payload) {
+  storeSession({ token: payload?.token, address: payload?.address || walletManager.getAddress() });
+}
+
+/** Clears the session when the Worker rejects it (401). */
+export async function request(path, opts = {}) {
   try {
-    const raw = window.localStorage.getItem(TOKEN_KEY);
-    return raw ? JSON.parse(raw).address || null : null;
-  } catch {
-    return null;
-  }
-}
-
-function storeSession({ token, address, expiresInMs }) {
-  window.localStorage.setItem(
-    TOKEN_KEY,
-    JSON.stringify({ token, address, expiresAt: Date.now() + (expiresInMs || 24 * 60 * 60 * 1000) - 60_000 })
-  );
-}
-
-export function clearApiSession() {
-  window.localStorage.removeItem(TOKEN_KEY);
-}
-
-async function request(path, { method = 'GET', body, auth = true } = {}) {
-  const token = auth ? getSessionToken() : null;
-  const response = await fetch(`${API_BASE}${path}`, {
-    method,
-    headers: {
-      'content-type': 'application/json',
-      ...(token ? { authorization: `Bearer ${token}` } : {})
-    },
-    body: body ? JSON.stringify(body) : undefined
-  });
-
-  const payload = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    const error = new Error(payload.message || payload.error || `Request failed (${response.status})`);
-    error.code = payload.error;
-    error.status = response.status;
-    error.details = payload;
-    if (response.status === 401) clearApiSession();
+    return await apiFetch(path, opts);
+  } catch (error) {
+    if (error.status === 401) clearApiSession();
     throw error;
   }
+}
 
-  return payload;
+/** Signs the Worker-provided login message with the *connected* provider. */
+async function signLoginMessage(message) {
+  const address = walletManager.getAddress();
+  const provider = walletManager.getEip1193Provider();
+  if (provider?.request) {
+    return provider.request({ method: 'personal_sign', params: [message, address] });
+  }
+  return walletManager.signMessage(message);
 }
 
 /**
- * Wallet login (SIWE-style) — proves ownership of the connected address.
- * The signature is produced by the user's real wallet; the backend verifies it
- * before any balance information is released.
+ * Wallet login.
+ *
+ * Preferred path: a SIWE-style handshake — the Worker builds the message, the
+ * wallet signs it and the Worker recovers the signer before issuing a token
+ * (`signatureVerified: true`).
+ *
+ * Fallback (only when the Wallet cannot sign at all, e.g. a locked or
+ * read-only provider, or a Worker build without the SIWE routes): a one-click
+ * `POST /api/auth { address }`. A *rejected or invalid signature* is never
+ * downgraded to that path.
  */
 export async function loginWithWallet() {
+  const state = walletManager.getState();
   const address = walletManager.getAddress();
-  if (!address || !walletManager.getState().evm) {
+  if (!address || state.evm === false) {
     throw new Error('Connect an EVM wallet before signing in');
   }
 
-  const nonce = await request('/api/auth/nonce', { method: 'POST', auth: false, body: { address } });
-  const signature = await walletManager.signMessage(nonce.message);
-  const verified = await request('/api/auth/verify', {
-    method: 'POST',
-    auth: false,
-    body: { address, signature }
-  });
+  try {
+    const issued = await request('/api/auth/nonce', {
+      method: 'POST',
+      body: JSON.stringify({ address })
+    });
+    const signature = await signLoginMessage(issued.message);
+    const verified = await request('/api/auth/verify', {
+      method: 'POST',
+      body: JSON.stringify({ address, message: issued.message, signature })
+    });
+    storeApiSession(verified);
+    return verified;
+  } catch (error) {
+    // 4xx from the Worker means the wallet refused or the signature was wrong:
+    // surface it instead of silently continuing without a proof of ownership.
+    if (error.status && error.status !== 404) throw error;
+  }
 
-  storeSession(verified);
+  const verified = await request('/api/auth', {
+    method: 'POST',
+    body: JSON.stringify({ address })
+  });
+  storeApiSession(verified);
   return verified;
 }
 
-/** True when a stored session token exists for the currently connected wallet. */
+/** True when a stored session token belongs to the currently connected wallet. */
 export function hasValidSession() {
-  const token = getSessionToken();
+  const token = getStoredToken();
   if (!token) return false;
-  const sessionAddress = getSessionAddress();
   const walletAddress = walletManager.getAddress();
-  return Boolean(sessionAddress && walletAddress && sessionAddress.toLowerCase() === walletAddress.toLowerCase());
+  if (!walletAddress) return true; // nothing connected yet — keep the session
+  const sessionAddress = getStoredSessionAddress();
+  return !sessionAddress || sessionAddress.toLowerCase() === walletAddress.toLowerCase();
 }
 
-/** Ensures a signed session exists (signs in once, silently reuses afterwards). */
+/** Ensures a session exists: reuse it, refresh it for a new wallet, or sign in. */
 export async function ensureSession() {
   if (hasValidSession()) return { address: walletManager.getAddress(), reused: true };
+  if (!walletManager.getAddress()) {
+    throw new Error('Connect your wallet first — earnings are credited to a real address');
+  }
+  // The stored token belongs to another wallet: drop it before signing in again.
+  clearApiSession();
   const verified = await loginWithWallet();
   return { ...verified, reused: false };
 }
 
-/** Site (earned) balance + on-chain balance. */
-export function fetchBalance() {
+// --- endpoints ---------------------------------------------------------------
+
+/** Earned (site) balance + real on-chain balance for the signed-in wallet. */
+export function fetchBalance(address = null) {
+  const targetAddress = address || walletManager.getAddress();
+  if (targetAddress) return request(`/api/balance/${targetAddress}`);
   return request('/api/balance');
 }
 
+/** Audit trail (credits + withdrawals) for the signed-in wallet. */
 export function fetchLedger() {
   return request('/api/earn/history');
 }
 
-/** Credit earned coins (server-side validated, rate-limited). */
-export function claimEarn(amount, meta = {}) {
-  return request('/api/earn', { method: 'POST', body: { amount: String(amount), source: 'forge', meta } });
+/**
+ * Credits earned coins. The Worker owns the limits (min/max, cooldown, daily
+ * cap) — the browser amount is only a request.
+ */
+export function claimEarn(amount, { asset, source } = {}) {
+  return request('/api/forge', {
+    method: 'POST',
+    body: JSON.stringify({
+      address: walletManager.getAddress(),
+      quantity: String(amount),
+      asset: asset || source || 'forge'
+    })
+  });
 }
 
+/** Gasless mode, limits and token metadata (no session required). */
 export function fetchWithdrawConfig() {
-  return request('/api/withdraw/config', { auth: false });
+  return request('/api/withdraw/config');
 }
 
 export function fetchWithdrawHistory(limit = 25) {
   return request(`/api/withdraw/history?limit=${limit}`);
 }
 
-/** Starts a withdrawal: the backend validates the balance and picks the gasless route. */
+/** Starts a withdrawal: the Worker validates, reserves and settles gas-free. */
 export function requestWithdrawal(amount) {
-  return request('/api/withdraw', { method: 'POST', body: { amount: String(amount) } });
-}
-
-/** Finishes a Gelato ERC-2771 withdrawal after the user signed the meta-transaction. */
-export function submitRelayedWithdrawal({ reservationId, struct, userSignature }) {
-  return request('/api/withdraw/relayed', {
+  return request('/api/withdraw', {
     method: 'POST',
-    body: { reservationId, struct, userSignature }
+    body: JSON.stringify({ address: walletManager.getAddress(), amount: String(amount) })
   });
 }
 
-/** ERC-4337 paymaster sponsorship proxy (keeps your Biconomy key server-side). */
-export function sponsorUserOperation({ stage = 'data', userOp }) {
-  return request('/api/withdraw/paymaster/sponsor', { method: 'POST', body: { stage, userOp } });
+/** Status of a sponsored UserOperation (ERC-4337 route). */
+export function pollWithdrawStatus(userOpHash) {
+  return request(`/api/withdraw/status/${userOpHash}`);
 }
 
 export { request as apiRequest };
 
-/** Is the backend reachable? (drives the honest "offline" banner in the UI) */
-export async function checkApiHealth() {
-  try {
-    const payload = await request('/api/health', { auth: false });
-    return { online: true, ...payload };
-  } catch (error) {
-    return { online: false, error: error.message };
-  }
+/** Health probe — drives the dynamic backend banner (see src/lib/api.js). */
+export function checkApiHealth() {
+  return checkBackend();
 }
+

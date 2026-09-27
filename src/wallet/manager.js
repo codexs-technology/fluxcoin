@@ -139,6 +139,7 @@ class WalletManager {
       );
     }
 
+    const normalizedAddress = ethers.getAddress(address);
     this.rawProvider = provider || null;
     this.browserProvider = provider ? new ethers.BrowserProvider(provider) : null;
 
@@ -147,7 +148,7 @@ class WalletManager {
       connectorType,
       connectorId,
       connectorName,
-      address: ethers.getAddress(address),
+      address: normalizedAddress,
       chainId: Number(chainId) || null,
       networkName: networkName(Number(chainId)) || null,
       evm,
@@ -157,6 +158,11 @@ class WalletManager {
 
     this.#attachProviderEvents(connectorName);
     this.#persist(connectorName);
+    try {
+      window.localStorage.setItem('fluxcoin_wallet', normalizedAddress);
+    } catch (storageError) {
+      console.warn('[wallet] could not persist wallet address to localStorage', storageError);
+    }
     await this.refreshBalance();
     return this.state;
   }

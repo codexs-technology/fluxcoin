@@ -1,6 +1,7 @@
 import React from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { useCoinBalance } from '../hooks/useCoinBalance';
+import { useWallet } from '../hooks/useWallet';
 import { Token3DCanvas } from './Token3DCanvas';
 
 export function ForgeSequence() {
@@ -14,19 +15,31 @@ export function ForgeSequence() {
     forgeError,
     triggerTokenForge
   } = useAppStore();
-  const { earn, isSignedIn, availableTokens, tokenSymbol } = useCoinBalance();
+  const { isConnected } = useWallet();
+  const { earn, isSignedIn, availableTokens, tokenSymbol, signIn, isLoading: isSigningIn } = useCoinBalance();
 
   const tokenSymbolLabel = customTokenName.trim()
     ? customTokenName.toUpperCase().slice(0, 8)
     : selectedToken.symbol;
 
-  // "Generate" credits the site balance through POST /api/earn (rate-limited and
-  // capped server-side). Nothing is minted on-chain here — that happens at
-  // withdrawal time, gas-free.
-  const handleGenerate = () => {
-    if (!isSignedIn) {
-      return triggerTokenForge(null);
+  /**
+   * "Generate" credits the site balance through POST /api/forge (rate-limited
+   * and capped server-side). Nothing is minted on-chain here — that happens at
+   * withdrawal time, gas-free.
+   *
+   * When the wallet is connected but the session is missing, sign in first
+   * instead of only printing an error: the user asked to generate, and signing a
+   * login message is free.
+   */
+  const handleGenerate = async () => {
+    if (isConnected && !isSignedIn) {
+      try {
+        await signIn();
+      } catch {
+        return triggerTokenForge(null); // the hook already surfaced the reason
+      }
     }
+    if (!isSignedIn && !isConnected) return triggerTokenForge(null);
     return triggerTokenForge(() => earn(mintQuantity));
   };
 
@@ -120,20 +133,28 @@ export function ForgeSequence() {
       {/* Generate Tokens Action Button */}
       <button
         onClick={handleGenerate}
-        disabled={isForging || !mintQuantity || Number(mintQuantity) <= 0}
+        disabled={isForging || isSigningIn || !mintQuantity || Number(mintQuantity) <= 0}
         className={`w-full py-3.5 px-4 rounded-md font-mono font-bold text-sm tracking-wider uppercase transition-all duration-200 shadow-glow-cyan ${
-          isForging
+          isForging || isSigningIn
             ? 'bg-cyan-900/50 text-cyan-200 cursor-not-allowed border border-cyan-400/50 animate-pulse'
             : 'bg-gradient-to-r from-cyan-500/20 via-cyan-400/30 to-emerald-500/20 hover:from-cyan-500/30 hover:to-emerald-500/30 text-white border border-cyan-400 hover:shadow-[0_0_25px_rgba(0,240,255,0.4)]'
         }`}
       >
-        {isForging ? 'CREDITING SITE BALANCE…' : `GENERATE ${mintQuantity || 0} ${tokenSymbol}`}
+        {isForging
+          ? 'CREDITING SITE BALANCE…'
+          : isSigningIn
+            ? 'SIGNING IN…'
+            : isConnected
+              ? `GENERATE ${mintQuantity || 0} ${tokenSymbol}`
+              : `CONNECT A WALLET TO GENERATE`}
       </button>
 
       <div className="text-[10px] text-center font-mono text-slate-500 leading-snug">
         {isSignedIn
           ? `Earnings are credited to your signed-in wallet on ${selectedToken.symbol} preset ${tokenSymbolLabel}. Withdraw them as real ERC-20 FLUX with 0 gas from the withdrawal tab.`
-          : 'Sign in with your wallet (or connect one) to credit earnings to your real address.'}
+          : isConnected
+            ? 'Generating will ask you to sign one free login message, then credits your real address.'
+            : 'Connect a wallet (extension, WalletConnect QR or AppKit) to credit earnings to your real address.'}
       </div>
     </div>
   );

@@ -9,6 +9,8 @@
  * connector was used.
  */
 const STORAGE_KEY = 'fluxcoin.wallet.session.v2';
+/** Plain mirror of the connected address (quick reads + UI re-hydration). */
+const WALLET_ADDRESS_KEY = 'fluxcoin_wallet';
 
 export function saveSession(session) {
   try {
@@ -17,6 +19,7 @@ export function saveSession(session) {
       savedAt: Date.now()
     };
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    if (payload.address) window.localStorage.setItem(WALLET_ADDRESS_KEY, payload.address);
     return payload;
   } catch (error) {
     console.warn('[wallet] could not persist session', error);
@@ -39,9 +42,20 @@ export function loadSession() {
 export function clearSession() {
   try {
     window.localStorage.removeItem(STORAGE_KEY);
+    window.localStorage.removeItem(WALLET_ADDRESS_KEY);
   } catch (error) {
     console.warn('[wallet] could not clear session', error);
   }
 }
 
+/** Last connected address, or null. Read without parsing the whole session. */
+export function loadStoredAddress() {
+  try {
+    return window.localStorage.getItem(WALLET_ADDRESS_KEY) || loadSession()?.address || null;
+  } catch {
+    return null;
+  }
+}
+
 export const SESSION_STORAGE_KEY = STORAGE_KEY;
+export const WALLET_ADDRESS_STORAGE_KEY = WALLET_ADDRESS_KEY;

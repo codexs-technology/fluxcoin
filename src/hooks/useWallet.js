@@ -22,6 +22,8 @@ import { isAppKitConfigured } from '../wallet/appkit.js';
 import { truncateAddress } from '../wallet/format.js';
 import { ACTIVE_CHAIN, SUPPORTED_NETWORKS } from '../wallet/chains.js';
 import { useAppStore } from '../store/useAppStore';
+import { checkBackend, describeBackendIssue } from '../lib/api.js';
+import { loginWithWallet } from '../api/client.js';
 
 /** Only the first mounted useWallet() instance performs the reload-restore. */
 let restoreStarted = false;
@@ -119,6 +121,11 @@ export function useWallet() {
   const connectWallet = useCallback(async (walletOrName) => {
     setError(null);
     try {
+      const health = await checkBackend({ timeoutMs: 5000 });
+      if (!health.online) {
+        throw new Error(health.error || `The FluxCoin API at ${health.base} is offline.`);
+      }
+
       let entry = walletOrName;
       if (typeof walletOrName === 'string' || !walletOrName?.provider) {
         const needle = String(walletOrName || '').toLowerCase();
@@ -135,11 +142,27 @@ export function useWallet() {
         }
         entry = found;
       }
-      if (entry.chain === 'solana' || entry.evm === false) return await connectWithSolana(entry);
-      return await connectWithInjected(entry);
+
+      if (entry.chain === 'solana' || entry.evm === false) {
+        const connected = await connectWithSolana(entry);
+        if (!connected?.address) throw new Error('The selected Solana wallet did not return a valid address.');
+        return connected;
+      }
+
+      const connected = await connectWithInjected(entry);
+      const address = walletManager.getAddress();
+      if (!address) throw new Error('Wallet connected but no address was returned by the provider.');
+      try {
+        await loginWithWallet();
+      } catch (loginError) {
+        setError(loginError.message || 'Wallet connected, but signature verification failed. Please sign the message to continue.');
+        throw loginError;
+      }
+      return connected;
     } catch (connectError) {
-      setError(connectError.message || 'Wallet connection failed');
-      throw connectError;
+      const message = connectError?.message || 'Wallet connection failed.';
+      setError(message);
+      throw new Error(message);
     }
   }, []);
 
@@ -148,16 +171,34 @@ export function useWallet() {
     setError(null);
     setPairingUri(null);
     try {
-      return await connectWithWalletConnect({
+      const health = await checkBackend({ timeoutMs: 5000 });
+      if (!health.online) {
+        throw new Error(health.error || `The FluxCoin API at ${health.base} is offline.`);
+      }
+
+      const connected = await connectWithWalletConnect({
         ...options,
         onUri: (uri) => {
           setPairingUri(uri);
           options.onUri?.(uri);
         }
       });
+
+      const address = walletManager.getAddress();
+      if (!address) throw new Error('WalletConnect connected but no wallet address was returned.');
+
+      try {
+        await loginWithWallet();
+      } catch (loginError) {
+        setError(loginError.message || 'WalletConnect connected, but the signature could not be verified. Please sign the message to continue.');
+        throw loginError;
+      }
+
+      return connected;
     } catch (connectError) {
-      setError(connectError.message || 'WalletConnect pairing failed');
-      throw connectError;
+      const message = connectError?.message || 'WalletConnect pairing failed.';
+      setError(message);
+      throw new Error(message);
     } finally {
       setPairingUri(null);
     }
@@ -167,10 +208,31 @@ export function useWallet() {
   const connectAppKit = useCallback(async () => {
     setError(null);
     try {
-      return await connectWithAppKit();
+      const health = await checkBackend({ timeoutMs: 5000 });
+      if (!health.online) {
+        throw new Error(health.error || `The FluxCoin API at ${health.base} is offline.`);
+      }
+
+      if (!isAppKitConfigured()) {
+        throw new Error('Reown AppKit is not configured: set VITE_WALLETCONNECT_PROJECT_ID in the root .env file.');
+      }
+
+      const connected = await connectWithAppKit();
+      const address = walletManager.getAddress();
+      if (!address) throw new Error('AppKit connected but no wallet address was returned.');
+
+      try {
+        await loginWithWallet();
+      } catch (loginError) {
+        setError(loginError.message || 'AppKit connected, but signature verification failed. Please sign the message to continue.');
+        throw loginError;
+      }
+
+      return connected;
     } catch (connectError) {
-      setError(connectError.message || 'AppKit could not be opened');
-      throw connectError;
+      const message = connectError?.message || 'AppKit could not be opened.';
+      setError(message);
+      throw new Error(message);
     }
   }, []);
 

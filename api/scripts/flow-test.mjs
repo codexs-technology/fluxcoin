@@ -1,155 +1,217 @@
 /**
- * End-to-end flow test (runs the API in-process, no funds needed).
+ * End-to-end check of the FluxCoin API.
  *
- *   cd api && npm run test:flow
+ *   npm run build && node scripts/flow-test.mjs        # in-process Worker bundle
+ *   node scripts/flow-test.mjs --url https://fluxcoin.codexstechnology.workers.dev
  *
- * Proves, against the REAL server code:
- *   1. a wallet authenticates by signing the SIWE-style message
- *   2. unsigned requests are rejected
- *   3. earning coins credits the site balance
- *   4. the balance is authoritative - over-withdrawing is rejected server-side
- *   5. a withdrawal debits the balance and produces a tx hash (dry-run in dev)
- *   6. gasless accounting: the user pays 0 gas
+ * In-process mode imports `dist/index.js` (the `wrangler deploy --dry-run`
+ * bundle) and calls `app.fetch()` with a test environment, so health, CORS
+ * preflight, auth (HMAC tokens + SIWE recovery), the ledger, forge and the
+ * withdrawal routes are all exercised for real.
  */
-import { ethers } from 'ethers';
-import { createApp } from '../src/app.js';
+import { existsSync, writeFileSync } from 'node:fs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import path from 'node:path';
+import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 
-const PORT = 8799;
-const BASE = `http://127.0.0.1:${PORT}`;
+const here = path.dirname(fileURLToPath(import.meta.url));
+const bundlePath = path.join(here, '..', 'dist', 'index.js');
 
-let passed = 0;
-let failed = 0;
+const urlArgIndex = process.argv.indexOf('--url');
+const REMOTE = urlArgIndex >= 0 ? process.argv[urlArgIndex + 1] : null;
 
-function check(name, condition, details = '') {
-  if (condition) {
-    passed += 1;
-    console.log(`  OK   ${name}`);
-  } else {
-    failed += 1;
-    console.error(`  FAIL ${name} ${details}`);
+const TEST_ENV = {
+  CHAIN_ID: '11155111',
+  RPC_URL: '',
+  TOKEN_ADDRESS: '',
+  FAUCET_ADDRESS: '',
+  SESSION_SECRET: 'flow-test-secret',
+  CORS_ORIGINS: '*',
+  SITE_DOMAIN: 'fluxcoin.pages.dev',
+  SITE_URL: 'https://fluxcoin.pages.dev',
+  GASLESS_MODE: 'dry-run',
+  ALLOW_DRY_RUN: 'true',
+  EARN_COOLDOWN_SECONDS: '0',
+  EARN_MAX_TOKENS: '100000',
+  WITHDRAW_MAX_TOKENS: '100000'
+};
+
+let app = null;
+if (!REMOTE) {
+  if (!existsSync(bundlePath)) {
+    console.error('Missing api/dist/index.js — run "npm run build" first (wrangler dry-run bundle).');
+    process.exit(1);
   }
+  app = (await import(pathToFileURL(bundlePath).href)).default;
 }
 
-async function api(path, { method = 'GET', body, token } = {}) {
-  const response = await fetch(`${BASE}${path}`, {
+const wallet = privateKeyToAccount(generatePrivateKey());
+const walletAddress = wallet.address;
+const stranger = privateKeyToAccount(generatePrivateKey()).address;
+let token = null;
+
+async function call(method, route, { body, auth = true, headers = {} } = {}) {
+  const init = {
     method,
     headers: {
-      'content-type': 'application/json',
-      ...(token ? { authorization: `Bearer ${token}` } : {})
+      Origin: 'https://fluxcoin.pages.dev',
+      'Content-Type': 'application/json',
+      ...(auth && token ? { Authorization: `Bearer ${token}` } : {}),
+      ...headers
     },
-    body: body ? JSON.stringify(body) : undefined
-  });
-  const payload = await response.json().catch(() => ({}));
-  return { status: response.status, payload };
-}
+    ...(body === undefined ? {} : { body: JSON.stringify(body) })
+  };
 
-async function main() {
-  const app = createApp();
-  const server = app.listen(PORT);
+  const response = REMOTE
+    ? await fetch(`${REMOTE}${route}`, init)
+    : await app.fetch(new Request(`https://fluxcoin.test${route}`, init), TEST_ENV, {});
 
+  const text = await response.text();
+  let payload = null;
   try {
-    console.log(`\n== FluxCoin end-to-end flow test (${BASE}) ==\n`);
-
-    const wallet = ethers.Wallet.createRandom();
-    console.log(`test wallet: ${wallet.address}\n`);
-
-    // --- 1. wallet authentication ---------------------------------------------
-    console.log('1) Wallet authentication');
-    const nonce = await api('/api/auth/nonce', { method: 'POST', body: { address: wallet.address } });
-    check('nonce issued', nonce.status === 200 && nonce.payload.message.includes(wallet.address));
-
-    const unauthed = await api('/api/balance');
-    check('requests without a session are rejected', unauthed.status === 401);
-
-    const signature = await wallet.signMessage(nonce.payload.message);
-    const verify = await api('/api/auth/verify', {
-      method: 'POST',
-      body: { address: wallet.address, signature }
-    });
-    check('signature verified, session issued', verify.status === 200 && Boolean(verify.payload.token));
-    const token = verify.payload.token;
-
-    const wrongSignature = await api('/api/auth/verify', {
-      method: 'POST',
-      body: { address: ethers.Wallet.createRandom().address, signature }
-    });
-    check('signature from another wallet is rejected', wrongSignature.status === 401);
-
-    // --- 2. earning coins ----------------------------------------------------
-    console.log('\n2) Earning coins (site faucet)');
-    const earn = await api('/api/earn', { method: 'POST', token, body: { amount: '2500', source: 'forge' } });
-    check('coins credited', earn.status === 200 && earn.payload.site.availableTokens === '2500.0');
-
-    const cooldown = await api('/api/earn', { method: 'POST', token, body: { amount: '10' } });
-    check('claim cooldown enforced', cooldown.status === 429 && cooldown.payload.error === 'COOLDOWN_ACTIVE');
-
-    const tooMuchEarn = await api('/api/earn', { method: 'POST', token, body: { amount: '999999999999' } });
-    check('per-claim cap enforced', tooMuchEarn.status === 400);
-
-    // --- 3. withdrawal validation ---------------------------------------------
-    console.log('\n3) Withdrawal validation (server-side)');
-    const overdraw = await api('/api/withdraw', { method: 'POST', token, body: { amount: '5000' } });
-    check(
-      'cannot withdraw more than the site balance',
-      overdraw.status === 400 && overdraw.payload.error === 'INSUFFICIENT_SITE_BALANCE',
-      JSON.stringify(overdraw.payload)
-    );
-
-    const negative = await api('/api/withdraw', { method: 'POST', token, body: { amount: '-5' } });
-    check('negative amounts rejected', negative.status === 400);
-
-    const otherWallet = await api('/api/withdraw', {
-      method: 'POST',
-      token,
-      body: { amount: '10', address: ethers.Wallet.createRandom().address }
-    });
-    check('withdrawing to another wallet is rejected', otherWallet.status === 403);
-
-    // --- 4. real withdrawal ---------------------------------------------------
-    console.log('\n4) Withdrawal (gasless)');
-    const withdraw = await api('/api/withdraw', { method: 'POST', token, body: { amount: '1000' } });
-    check('withdrawal accepted', withdraw.status === 200 && withdraw.payload.ok === true, JSON.stringify(withdraw.payload));
-
-    if (withdraw.payload.status === 'AWAITING_USER_SIGNATURE') {
-      console.log(`   mode ${withdraw.payload.mode}: the user signs typed data next (needs a paymaster key)`);
-      check('gasless authorization returned', Boolean(withdraw.payload.authorization?.signature));
-    } else {
-      check('tx hash produced', Boolean(withdraw.payload.txHash));
-      check('user gas cost is zero', withdraw.payload.userGasCost === '0');
-      check('gas payer recorded', String(withdraw.payload.gasPaidBy).length > 0);
-      console.log(`   mode: ${withdraw.payload.mode} | payer: ${withdraw.payload.gasPaidBy}`);
-      console.log(`   tx  : ${withdraw.payload.txHash}`);
-    }
-
-    // --- 5. balance bookkeeping ----------------------------------------------
-    console.log('\n5) Balance bookkeeping');
-    const balance = await api('/api/balance', { token });
-    check(
-      'available balance debited by exactly the withdrawn amount',
-      balance.payload.site.availableTokens === '1500.0',
-      `available=${balance.payload.site?.availableTokens}`
-    );
-    check(
-      'withdrawn total tracked',
-      balance.payload.site.withdrawnTokens !== '0.0' || withdraw.payload.status === 'AWAITING_USER_SIGNATURE'
-    );
-
-    const history = await api('/api/withdraw/history', { token });
-    check('withdrawal appears in the audit trail', history.payload.entries.length >= 1);
-
-    const health = await api('/api/health');
-    check('health endpoint reports chain status', health.status === 200 && Boolean(health.payload.chain));
-
-    console.log(`\n== result: ${passed} passed, ${failed} failed ==`);
-    console.log('(dev runs use ALLOW_DRY_RUN=true, so no real transaction is broadcast)\n');
-  } finally {
-    server.close();
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    payload = { raw: text.slice(0, 200) };
   }
-
-  process.exit(failed === 0 ? 0 : 1);
+  return { status: response.status, payload, headers: response.headers };
 }
 
-main().catch((error) => {
-  console.error('flow test crashed:', error);
-  process.exit(1);
-});
+let failures = 0;
+const report = [];
+function check(label, condition, detail = '') {
+  if (!condition) failures += 1;
+  const line = `${condition ? 'PASS' : 'FAIL'}  ${label}${detail ? ` — ${detail}` : ''}`;
+  report.push(line);
+  console.log(line);
+}
+
+// 1. health ------------------------------------------------------------------
+{
+  const { status, payload } = await call('GET', '/api/health', { auth: false });
+  check('GET /api/health returns 200 + ok:true', status === 200 && payload?.ok === true, `status ${status}`);
+  check('health advertises the service name', payload?.service === 'fluxcoin-api', String(payload?.service));
+  check('health reports 0 user gas', payload?.gasless?.userGasCost === '0', JSON.stringify(payload?.gasless));
+}
+
+// 2. the Worker must not serve the frontend ----------------------------------
+{
+  const { status, payload } = await call('GET', '/index.html', { auth: false });
+  check('non-API route answers a JSON 404 (no SPA fallback)', status === 404 && payload?.ok === false, `status ${status}`);
+}
+
+// 3. CORS preflight ----------------------------------------------------------
+{
+  const { status, headers } = await call('OPTIONS', '/api/forge', { auth: false, body: {} });
+  check('OPTIONS preflight returns 204', status === 204, `status ${status}`);
+  check('preflight echoes the Origin', headers.get('access-control-allow-origin') === 'https://fluxcoin.pages.dev', String(headers.get('access-control-allow-origin')));
+  check('preflight allows the Authorization header', (headers.get('access-control-allow-headers') || '').includes('Authorization'), String(headers.get('access-control-allow-headers')));
+}
+
+// 4. auth --------------------------------------------------------------------
+{
+  const anonymous = await call('GET', '/api/balance', { auth: false });
+  check('protected route rejects an anonymous caller', anonymous.status === 401, `status ${anonymous.status}`);
+
+  const malformed = await call('POST', '/api/auth', { body: { address: 'not-an-address' }, auth: false });
+  check('auth rejects a malformed address', malformed.status === 400, `status ${malformed.status}`);
+
+  const signed = await call('POST', '/api/auth', { body: { address: walletAddress }, auth: false });
+  check('POST /api/auth returns ok + address + token', signed.status === 200 && signed.payload?.ok === true && Boolean(signed.payload?.token), String(signed.payload?.error || ''));
+  token = signed.payload?.token || null;
+  check('auth echoes the connected address', String(signed.payload?.address).toLowerCase() === walletAddress.toLowerCase(), String(signed.payload?.address));
+}
+
+// 5. SIWE signature flow -----------------------------------------------------
+{
+  const nonce = await call('POST', '/api/auth/nonce', { body: { address: walletAddress }, auth: false });
+  check('POST /api/auth/nonce returns a message to sign', nonce.status === 200 && Boolean(nonce.payload?.message), `status ${nonce.status}`);
+
+  const signature = await wallet.signMessage({ message: nonce.payload.message });
+  const tampered = await call('POST', '/api/auth/verify', {
+    body: { address: walletAddress, message: `${nonce.payload.message}\nsteal everything`, signature },
+    auth: false
+  });
+  check('auth/verify refuses a tampered message', tampered.status === 401, `status ${tampered.status}`);
+
+  const fresh = await call('POST', '/api/auth/nonce', { body: { address: walletAddress }, auth: false });
+  const goodSignature = await wallet.signMessage({ message: fresh.payload.message });
+  const verified = await call('POST', '/api/auth/verify', {
+    body: { address: walletAddress, message: fresh.payload.message, signature: goodSignature },
+    auth: false
+  });
+  check('auth/verify accepts a real signature', verified.status === 200 && verified.payload?.signatureVerified === true, `status ${verified.status}`);
+
+  const replay = await call('POST', '/api/auth/verify', {
+    body: { address: walletAddress, message: fresh.payload.message, signature: goodSignature },
+    auth: false
+  });
+  check('the nonce is single use (replay rejected)', replay.status === 401, `status ${replay.status}`);
+}
+
+// 6. balance + forge ---------------------------------------------------------
+{
+  const before = await call('GET', '/api/balance');
+  check('GET /api/balance starts at 0', before.status === 200 && before.payload?.site?.availableTokens === '0', String(before.payload?.site?.availableTokens));
+
+  const mismatch = await call('GET', `/api/balance/${stranger}`);
+  check('balance of another wallet is refused', mismatch.status === 403, `status ${mismatch.status}`);
+
+  const foreign = await call('POST', '/api/forge', { body: { address: stranger, quantity: '10' } });
+  check('forge cannot credit a foreign address', foreign.status === 403, `status ${foreign.status}`);
+
+  const huge = await call('POST', '/api/forge', { body: { quantity: '999999' } });
+  check('forge enforces the per-claim maximum', huge.status === 400 && huge.payload?.error === 'ABOVE_MAXIMUM', String(huge.payload?.error));
+
+  const credited = await call('POST', '/api/forge', { body: { quantity: '1000' } });
+  check('POST /api/forge credits the site balance', credited.status === 200 && credited.payload?.site?.availableTokens === '1000', JSON.stringify(credited.payload?.site || credited.payload));
+
+  const alias = await call('POST', '/api/earn', { body: { amount: '500' } });
+  check('POST /api/earn alias credits too', alias.status === 200 && alias.payload?.site?.availableTokens === '1500', String(alias.payload?.site?.availableTokens));
+
+  const history = await call('GET', '/api/earn/history');
+  check('GET /api/earn/history lists both credits', history.status === 200 && history.payload?.entries?.length === 2, `entries ${history.payload?.entries?.length}`);
+}
+
+// 7. withdrawals -------------------------------------------------------------
+{
+  const config = await call('GET', '/api/withdraw/config', { auth: false });
+  check('GET /api/withdraw/config advertises 0 user gas', config.status === 200 && config.payload?.userGasCost === '0', `status ${config.status}`);
+
+  const tooMuch = await call('POST', '/api/withdraw', { body: { amount: '99999' } });
+  check('withdraw above the earned balance is refused', tooMuch.status === 400 && tooMuch.payload?.error === 'INSUFFICIENT_SITE_BALANCE', String(tooMuch.payload?.error));
+
+  const badAmount = await call('POST', '/api/withdraw', { body: { amount: 'abc' } });
+  check('withdraw rejects a non-numeric amount', badAmount.status === 400, `status ${badAmount.status}`);
+
+  const foreign = await call('POST', '/api/withdraw', { body: { address: stranger, amount: '1' } });
+  check('withdraw cannot target a foreign address', foreign.status === 403, `status ${foreign.status}`);
+
+  const withdrawn = await call('POST', '/api/withdraw', { body: { amount: '400' } });
+  check('withdraw settles with 0 user gas', withdrawn.status === 200 && withdrawn.payload?.userGasCost === '0', JSON.stringify(withdrawn.payload || {}).slice(0, 160));
+  check('withdraw reports its reservation + mode', Boolean(withdrawn.payload?.reservationId) && Boolean(withdrawn.payload?.mode), `${withdrawn.payload?.reservationId} / ${withdrawn.payload?.mode}`);
+
+  const after = await call('GET', '/api/balance');
+  check('balance drops by exactly the withdrawn amount', after.payload?.site?.availableTokens === '1100', String(after.payload?.site?.availableTokens));
+  check('withdrawn amount is booked', after.payload?.site?.withdrawnTokens === '400', String(after.payload?.site?.withdrawnTokens));
+
+  const withdrawals = await call('GET', '/api/withdraw/history');
+  check('GET /api/withdraw/history returns the entry', withdrawals.payload?.entries?.length === 1, `entries ${withdrawals.payload?.entries?.length}`);
+
+  const unknownHash = await call('GET', `/api/withdraw/status/0x${'0'.repeat(64)}`, { auth: false });
+  check('unknown UserOperation hash answers 404', unknownHash.status === 404, `status ${unknownHash.status}`);
+
+  const badHash = await call('GET', '/api/withdraw/status/0x1234', { auth: false });
+  check('malformed UserOperation hash answers 400', badHash.status === 400, `status ${badHash.status}`);
+}
+
+const summary = `${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`} (${REMOTE ? `against ${REMOTE}` : 'in-process Worker bundle'})`;
+report.push('', summary);
+console.log(`\n${summary}`);
+
+const reportPath = path.join(here, '..', 'dist', 'flow-test-report.txt');
+writeFileSync(reportPath, `${report.join('\n')}\n`);
+console.log(`report written to ${reportPath}`);
+
+process.exit(failures === 0 ? 0 : 1);
+
+

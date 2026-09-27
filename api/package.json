@@ -1,20 +1,25 @@
 {
   "name": "fluxcoin-api",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
-  "description": "FluxCoin backend: wallet auth, site balance ledger, gasless (sponsored) FLUX withdrawals",
-  "main": "server.js",
+  "description": "FluxCoin API: a Cloudflare Worker (Hono) serving the earned-balance ledger and gasless FLUX withdrawals",
+  "main": "src/index.ts",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js",
+    "dev": "wrangler dev --config ../wrangler.jsonc",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "wrangler deploy --config ../wrangler.jsonc --dry-run --outdir api/dist",
+    "deploy": "wrangler deploy --config ../wrangler.jsonc",
     "test:flow": "node scripts/flow-test.mjs"
   },
   "dependencies": {
-    "@gelatonetwork/relay-sdk": "^5.7.0",
-    "cors": "^2.8.5",
-    "dotenv": "^16.4.7",
-    "ethers": "^6.17.0",
-    "express": "^4.21.2"
+    "hono": "^4.13.9",
+    "permissionless": "^0.4.1",
+    "viem": "^2.56.9"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260926.1",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.141.0"
   }
 }

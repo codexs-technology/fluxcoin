@@ -18,7 +18,7 @@ import { ACTIVE_CHAIN, CHAIN_LIST } from './chains.js';
 
 const env = (typeof import.meta !== 'undefined' && import.meta.env) || {};
 
-export const PROJECT_ID = env.VITE_WALLETCONNECT_PROJECT_ID || '';
+export const PROJECT_ID = String(env.VITE_WALLETCONNECT_PROJECT_ID || '').trim();
 export const APP_NAME = env.VITE_APP_NAME || 'FluxCoin';
 export const APP_URL = env.VITE_APP_URL || (typeof window !== 'undefined' ? window.location.origin : 'https://fluxcoin.app');
 export const APP_ICON =
@@ -26,7 +26,9 @@ export const APP_ICON =
   (typeof window !== 'undefined' ? `${window.location.origin}/favicon.ico` : 'https://fluxcoin.app/favicon.ico');
 
 export function isAppKitConfigured() {
-  return Boolean(PROJECT_ID && PROJECT_ID.length >= 8 && !PROJECT_ID.includes('YOUR_'));
+  const hasValue = Boolean(PROJECT_ID && PROJECT_ID.length >= 8);
+  const hasPlaceholder = /YOUR_|example|replace-me|demo/i.test(PROJECT_ID);
+  return hasValue && !hasPlaceholder;
 }
 
 let appkitPromise = null;
