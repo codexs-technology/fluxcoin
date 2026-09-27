@@ -53,14 +53,4 @@
   //   npx wrangler secret put SESSION_SECRET     # long random string
   //   npx wrangler secret put MINTER_PRIVATE_KEY # sponsor wallet (MINTER_ROLE)
   //
-  // KV namespace for durable, non-ephemeral app storage.
-  // Create it with:
-  //   npx wrangler kv namespace create STORAGE --config wrangler.jsonc
-  // Then replace the empty id with the returned namespace id.
-  "kv_namespaces": [
-    {
-      "binding": "STORAGE",
-      "id": ""
-    }
-  ]
 }
