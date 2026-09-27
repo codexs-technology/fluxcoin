@@ -233,7 +233,23 @@ app.get('/', (c) => {
  * Liveness check — always returns ok so the frontend can verify connectivity.
  */
 app.get('/api/health', async (c) => {
-  return c.json({ status: 'ok' });
+  const config = configOf(c);
+  const store = createStore(c.env as unknown as Record<string, unknown>);
+  return c.json({
+    ok: true,
+    service: 'fluxcoin-api',
+    status: 'online',
+    version: '1.0.0',
+    timestamp: new Date().toISOString(),
+    network: {
+      chainId: config.chain.chainId,
+      explorer: config.chain.explorerUrl,
+      tokenConfigured: Boolean(config.chain.tokenAddress)
+    },
+    storage: store.kind,
+    gasless: resolveGaslessMode(config),
+    warnings: configWarnings(config)
+  });
 });
 
 // --- auth --------------------------------------------------------------------
