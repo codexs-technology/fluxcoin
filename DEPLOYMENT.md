@@ -196,6 +196,18 @@ npx wrangler pages deploy dist --project-name fluxcoin   # manual deploy
 
 > ⚠️ VITE_* values build-time pe bundle me bake hoti hain — badalne ke baad **rebuild + redeploy** zaroori hai.
 
+**Network selection priority (network-revert bug fix):**
+
+| Priority | Source | Kab use hota hai |
+|----------|--------|------------------|
+| 1 | **UI dropdown (`03 // Settlement Wallet`)** — user ki live selection | Hamesha. Har action (import / withdraw / generate / swap) yahi chain use karta hai — koi action selection ko override NAHI karta. |
+| 2 | **localStorage preference** (`fluxcoin.networkPreference.v1`) | Page refresh / reconnect pe wallet ko wapas isi chain pe laane ke liye (injected wallets, silently). |
+| 3 | **`VITE_NETWORK_ID`** (build default) | SIRF jab user ne kabhi kuch select na kiya ho YA wallet kisi unknown chain pe ho. Code ka fallback bhi 137 (Polygon) hai. |
+
+- Root `.env` git me commit NAHI hoti, isliye Cloudflare Pages build me `VITE_NETWORK_ID` tabhi milega jab dashboard me Environment Variable set ho — **isliye Pages settings me `VITE_NETWORK_ID=137` zaroor set karo** (nahi to code ka hardcoded fallback 137 hi chalega, jo theek hai, par explicit better hai).
+- Sepolia (11155111) kabhi implicit default NAHI hai — sirf tab jab user khud dropdown se Sepolia select kare.
+- "IMPORT FLASH TOKENS" ab user ki current chain pe hi watchAsset chalata hai; chain switch sirf tab jab wallet unknown chain pe ho.
+
 ## Step 8 — End-to-end test checklist (production)
 
 1. `https://fluxcoin.pages.dev` kholo → MetaMask connect karo (sirf connect — **auto signature prompt nahi aana chahiye**).
@@ -232,6 +244,7 @@ npm run deploy:flash:sepolia
 | Balances reset ho rahe | KV namespace bind nahi hai (Step 6d). |
 | MetaMask "This site may be compromised" | MetaMask ka phishing-blocklist fluxcoin.pages.dev ko flag kar raha (code clean hai). Fix ke liye custom domain use karo (e.g. `fluxcoin.xyz` → Pages custom domain) — pages.dev subdomain MetaMask ke blocklist me aa sakta hai. Appeal bhi possible hai: https://github.com/MetaMask/phishing-detection — repo me issue kholo apne domain ke saath. |
 | `UNKNOWN_ASSET` API error (`asset: "forge"`) | Frontend purane code se chal raha hai — ya to naya build deploy nahi hua (Step 7), ya dev server purane `.kilo/worktrees/*` folder se chal raha hai. Fix: root folder (`e:\Flush Coin`) se `npm run dev` / naya build deploy karo. |
+| IMPORT FLASH TOKENS dabane pe network selection Sepolia pe revert ho jati | Purana build `ensureWalletChain()` ko build-default chain pe FORCE karta tha, aur purane code ka fallback Sepolia (11155111) tha kyunki `.env` Pages build tak pahunchti hi nahi. Naya code user ki current chain respect karta hai + selection localStorage me persist hoti hai — naya build deploy karo (Step 7) aur browser hard-refresh (Ctrl+Shift+R). |
 
 ## File reference (kya kahan hai)
 

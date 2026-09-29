@@ -226,7 +226,9 @@ export function WalletConnect() {
             disabled={importingTokens}
             className="w-full text-[10px] font-mono px-2 py-1.5 rounded bg-cyan-950/50 hover:bg-cyan-900/60 border border-cyan-500/40 text-cyan-300 disabled:opacity-50 transition-colors"
           >
-            {importingTokens ? 'IMPORTING TOKENS…' : `IMPORT FLASH TOKENS (${ACTIVE_CHAIN.shortName})`}
+            {importingTokens
+              ? 'IMPORTING TOKENS…'
+              : `IMPORT FLASH TOKENS (${activeChainInfo?.shortName || ACTIVE_CHAIN.shortName})`}
           </button>
           {importResult && <div className="text-[9px] font-mono text-slate-500 leading-snug">{importResult}</div>}
         </div>

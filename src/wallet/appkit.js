@@ -53,7 +53,9 @@ export function initAppKit() {
 
       const availableNetworks = { 1: mainnet, 11155111: sepolia, 56: bsc, 137: polygon };
       const networks = CHAIN_LIST.map((chain) => availableNetworks[chain.chainId]).filter(Boolean);
-      const defaultNetwork = availableNetworks[ACTIVE_CHAIN.chainId] || networks[0];
+      // Default = the build's active chain (Polygon 137). Sepolia is never an
+      // implicit fallback — it is only reachable when the user picks it.
+      const defaultNetwork = availableNetworks[ACTIVE_CHAIN.chainId] || availableNetworks[137] || networks[0];
 
       const adapter = new EthersAdapter();
 

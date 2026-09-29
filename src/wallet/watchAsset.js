@@ -24,24 +24,33 @@ function chainParams(chain) {
 }
 
 /**
- * Switches (or adds) the connected wallet to the chain the Flash contracts live
- * on — Polygon (137) in production. Returns { switched, added, chainId }.
+ * Switches (or adds) the connected wallet to `chainId` — WITHOUT overriding the
+ * user's selection. When no chain is passed, the wallet's CURRENT chain wins
+ * (that is what the "03 // Settlement Wallet" dropdown shows); the build default
+ * (ACTIVE_CHAIN — Polygon 137) is only used when the wallet sits on a chain this
+ * build does not know. Returns { switched, added, chainId }.
  */
-export async function ensureWalletChain(chainId = ACTIVE_CHAIN.chainId) {
+export async function ensureWalletChain(chainId) {
   const provider = walletManager.getEip1193Provider();
   if (!provider?.request) throw new Error('No EVM wallet connected');
 
-  const target = typeof chainId === 'number' ? chainId : ACTIVE_CHAIN.chainId;
-  const chain = getChain(target) || ACTIVE_CHAIN;
+  const current = walletManager.getState().chainId;
+  const requested =
+    typeof chainId === 'number'
+      ? chainId
+      : getChain(current)
+        ? current // the user's live selection — never stomp it with a build default
+        : ACTIVE_CHAIN.chainId;
+  const chain = getChain(requested) || ACTIVE_CHAIN;
 
   try {
     await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: chain.hex }] });
-    return { switched: true, added: false, chainId: target };
+    return { switched: true, added: false, chainId: requested };
   } catch (error) {
     // 4902 = the wallet does not know this chain yet -> add it (EIP-3085).
     if (error?.code === 4902 || /Unrecognized chain/i.test(error?.message || '')) {
       await provider.request({ method: 'wallet_addEthereumChain', params: [chainParams(chain)] });
-      return { switched: true, added: true, chainId: target };
+      return { switched: true, added: true, chainId: requested };
     }
     if (error?.code === 4001) throw new Error('Network switch rejected in the wallet');
     throw error;
@@ -79,14 +88,20 @@ export async function watchAsset({ address, symbol, decimals, image }) {
 }
 
 /**
- * One-click helper: switches the wallet to the active chain (Polygon) and
- * imports every configured Flash token. Returns what happened so the UI can
- * print a truthful summary — never fabricates success.
+ * One-click helper: imports every configured Flash token on the network the USER
+ * selected (the wallet's current chain). Only an unknown/unsupported chain
+ * falls back to the build default (Polygon) — importing must never move the
+ * user to another network. Returns what happened so the UI can print a
+ * truthful summary — never fabricates success.
  */
 export async function importAllFlashAssets() {
   const result = { switched: null, imported: [], skipped: [], failed: [] };
 
-  result.switched = await ensureWalletChain();
+  // The user's selection wins: keep the wallet on its CURRENT chain when it is
+  // one we support; the env default (ACTIVE_CHAIN) is only a fallback.
+  const current = walletManager.getState().chainId;
+  const target = getChain(current) ? current : ACTIVE_CHAIN.chainId;
+  result.switched = await ensureWalletChain(target);
 
   for (const asset of flashAssets) {
     if (!asset.configured) {

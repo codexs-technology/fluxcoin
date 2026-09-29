@@ -2,6 +2,7 @@ import { ethers } from 'ethers';
 import { ACTIVE_CHAIN, getChain, networkName, SUPPORTED_NETWORKS } from './chains.js';
 import { discoverAllWallets } from './eip6963.js';
 import { saveSession, loadSession, clearSession } from './session.js';
+import { getPreferredNetworkId, setPreferredNetworkId } from './networkPreference.js';
 import * as wc from './walletConnectEngine.js';
 import { isAppKitConfigured, initAppKit, getAppKitAccount, getAppKitEip1193Provider, disconnectAppKit, openAppKitModal, onAppKitAccountChange } from './appkit.js';
 
@@ -98,6 +99,9 @@ class WalletManager {
     this.bound.chainChanged = async (chainIdHex) => {
       const parsed = typeof chainIdHex === 'number' ? chainIdHex : Number(BigInt(chainIdHex));
       this.#setState({ chainId: parsed, networkName: networkName(parsed) });
+      // The wallet moved chains (user action or wallet UI) — keep the saved
+      // selection in sync so a page refresh returns to THIS chain.
+      setPreferredNetworkId(parsed);
       this.#persist(connectorName);
       await this.refreshBalance();
     };
@@ -328,6 +332,8 @@ class WalletManager {
     }
 
     this.#setState({ chainId: target.chainId, networkName: target.name });
+    // Remember the user's selection (localStorage) — survives page refresh.
+    setPreferredNetworkId(target.chainId);
     this.#persist();
     await this.refreshBalance();
     return target;
@@ -351,6 +357,33 @@ class WalletManager {
   }
 
   /**
+   * Best-effort: after a page refresh, put an injected (extension) wallet back
+   * on the network the user last selected (localStorage preference). Only a
+   * plain `wallet_switchEthereumChain` is used — chains the wallet already
+   * knows switch silently; on ANY failure we give up without prompting (no
+   * `wallet_addEthereumChain` here — the user can always use the dropdown).
+   * WalletConnect/AppKit sessions are skipped: those would pop an approval on
+   * the user's phone, which we never do on page load.
+   */
+  async #applyPreferredNetwork() {
+    if (this.state.connectorType !== 'injected' || this.state.evm === false || !this.rawProvider?.request) {
+      return this.state?.chainId ?? null;
+    }
+    const preferred = getPreferredNetworkId();
+    const chain = preferred ? getChain(preferred) : null;
+    if (!chain || this.state.chainId === chain.chainId) return this.state.chainId;
+    try {
+      await this.rawProvider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: chain.hex }] });
+      this.#setState({ chainId: chain.chainId, networkName: chain.name });
+      this.#persist();
+      await this.refreshBalance();
+    } catch (error) {
+      console.warn('[wallet] could not re-apply the preferred network:', error?.message);
+    }
+    return this.state.chainId;
+  }
+
+  /**
    * Restores the previous session on page load:
    *   - injected wallets are re-checked with `eth_accounts` (never prompts)
    *   - WalletConnect/AppKit sessions are rehydrated from their own storage
@@ -369,7 +402,7 @@ class WalletManager {
         const accounts = await entry.provider.request({ method: 'eth_accounts' });
         if (!accounts?.length) return null;
         const chainIdHex = await entry.provider.request({ method: 'eth_chainId' }).catch(() => null);
-        return this.#finalize({
+        const restored = await this.#finalize({
           address: accounts[0],
           chainId: chainIdHex ? Number(BigInt(chainIdHex)) : stored.chainId,
           connectorType: 'injected',
@@ -377,6 +410,10 @@ class WalletManager {
           connectorName: entry.name,
           provider: entry.provider
         });
+        // Page-refresh persistence: put the wallet back on the user's saved
+        // network (best-effort, never prompts — see #applyPreferredNetwork).
+        await this.#applyPreferredNetwork();
+        return restored || this.state;
       }
 
       if (stored.connectorType === 'walletconnect') {
