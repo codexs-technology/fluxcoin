@@ -1,19 +1,24 @@
 /**
  * Deployment wiring for the FluxCoin contracts (frontend side).
  *
- * The addresses are NEVER hardcoded to a random/placeholder token: they come from
- * the deployment manifest that `contracts/scripts/deploy.js` prints, via env vars
+ * The addresses are NEVER hardcoded to a random/placeholder token: each asset's
+ * contract (Flash USDT/BTC/ETH/TRX/SOL) comes from the deploy manifest that
+ * `contracts/scripts/deployFlashAssets.js` prints, via the per-asset env vars
  * in the repository root `.env`:
  *
- *   VITE_TOKEN_ADDRESS=0x...   <- FluxCoin (ERC-20, 18 decimals)
- *   VITE_FAUCET_ADDRESS=0x...  <- FluxFaucet (gasless claim / withdrawal target)
- *   VITE_NETWORK_ID=11155111   <- chain the contracts live on
- *   VITE_ROUTER_ADDRESS=0x...  <- optional DEX router override
+ *   VITE_TOKEN_ADDRESS_USDT=0x...   (see src/contracts/assets.js for all 5)
+ *   VITE_NETWORK_ID=137              <- chain the contracts live on
+ *   VITE_ROUTER_ADDRESS=0x...       <- optional DEX router override
+ *
+ * The legacy single-token vars (VITE_TOKEN_ADDRESS / VITE_TOKEN_SYMBOL /
+ * VITE_TOKEN_DECIMALS) are only fallbacks for the legacy `useToken()` defaults
+ * and default to the default asset (USDT) — the FLUX token was removed.
  *
  * When they are missing the app says so instead of pretending to be connected to
  * a token (this replaced the old `0x6B1754...` DAI placeholder).
  */
 import { ACTIVE_CHAIN, ACTIVE_CHAIN_ID, explorerAddressUrl } from '../wallet/chains.js';
+import { flashAssets } from './assets.js';
 
 const env = (typeof import.meta !== 'undefined' && import.meta.env) || {};
 
@@ -26,7 +31,7 @@ export const DEX_ROUTERS = {
   137: '0xa5E0829CaCEd8fFDD4De3c43696c57F7D7A678ff' // QuickSwap (Polygon)
 };
 
-/** Wrapped native token per chain (needed for FLUX/WETH style routing). */
+/** Wrapped native token per chain (needed for token/WETH style routing). */
 export const WRAPPED_NATIVE = {
   1: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
   11155111: '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14',
@@ -44,13 +49,15 @@ export const ROUTER_ADDRESS =
   DEX_ROUTERS[ACTIVE_CHAIN_ID] ||
   '';
 
-export const TOKEN_SYMBOL = env.VITE_TOKEN_SYMBOL || 'FLUX';
-/** The contract is a standard ERC-20 with 18 decimals (exchange/DEX compatible). */
-export const TOKEN_DECIMALS = 18;
+/** Legacy single-token defaults — mirror the DEFAULT asset (USDT) from the registry. */
+const DEFAULT_ASSET = flashAssets[0];
+export const TOKEN_SYMBOL = env.VITE_TOKEN_SYMBOL || DEFAULT_ASSET.symbol;
+/** Contract precision of the default asset (matches src/contracts/assets.js). */
+export const TOKEN_DECIMALS = DEFAULT_ASSET.decimals;
 
 export const WRAPPED_NATIVE_ADDRESS = WRAPPED_NATIVE[ACTIVE_CHAIN_ID] || '';
 
-/** True when this build knows where the FLUX token lives on the active chain. */
+/** True when this build knows where the selected asset's token lives on the active chain. */
 export function isTokenConfigured() {
   return Boolean(TOKEN_ADDRESS);
 }
@@ -58,7 +65,7 @@ export function isTokenConfigured() {
 /** Human readable reason for the UI when the token is not wired yet. */
 export function tokenConfigHint() {
   if (isTokenConfigured()) return null;
-  return `VITE_TOKEN_ADDRESS is not set — deploy the contracts (contracts/scripts/deploy.js) and add the printed addresses to the root .env (chain ${ACTIVE_CHAIN_ID} / ${ACTIVE_CHAIN.name})`;
+  return `VITE_TOKEN_ADDRESS_USDT is not set — deploy the contracts (contracts/scripts/deployFlashAssets.js) and add the printed addresses to the root .env (chain ${ACTIVE_CHAIN_ID} / ${ACTIVE_CHAIN.name})`;
 }
 
 export function explorerTokenUrl(address = TOKEN_ADDRESS) {

@@ -23,7 +23,7 @@ export function getReadProvider() {
 
 function requireAddress(address, label = 'token address') {
   if (!ethers.isAddress(address)) {
-    throw new Error(`Invalid ${label}: "${address}". Set VITE_TOKEN_ADDRESS in the root .env (see README).`);
+    throw new Error(`Invalid ${label}: "${address}". Set the asset's VITE_TOKEN_ADDRESS_* value in the root .env (see README).`);
   }
   return ethers.getAddress(address);
 }

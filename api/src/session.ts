@@ -76,7 +76,7 @@ export function buildSignInMessage({
     `${config.site.domain} wants you to sign in with your Ethereum account:`,
     address,
     '',
-    'Sign in to FluxCoin to load your earned balance and withdraw FLUX with 0 gas.',
+    'Sign in to FluxCoin to load your earned balance and withdraw your tokens with 0 gas.',
     'No transaction is sent and no gas is required.',
     '',
     `URI: ${config.site.url}`,

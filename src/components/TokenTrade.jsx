@@ -30,7 +30,7 @@ export default function TokenTrade() {
 
       <div className="p-2 rounded bg-amber-950/30 border border-amber-500/40 text-[10px] text-amber-300 leading-snug">
         Demo orderbook UI — no orders are executed here. To trade on-chain, use the DEX swap tab (add liquidity first,
-        see the README). Withdrawals of earned coins are handled in the "02 // WITHDRAW FLUX" tab.
+        see the README). Withdrawals of earned coins are handled in the "02 // WITHDRAW ASSETS" tab.
       </div>
 
       <div className="grid grid-cols-2 gap-1.5 p-0.5 bg-[#070d14] rounded border border-slate-800">

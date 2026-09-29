@@ -25,7 +25,7 @@ export function OperationLedger() {
           <div className="space-y-2">
             {withdrawalQueue.length === 0 && (
               <div className="p-2 rounded bg-slate-900/60 border border-slate-800/80 text-[11px] text-slate-500">
-                No pending withdrawals. Earned FLUX is withdrawn from the "02 // WITHDRAW FLUX" tab.
+                No pending withdrawals. Earned tokens are withdrawn from the "02 // WITHDRAW ASSETS" tab.
               </div>
             )}
             {withdrawalQueue.map((item) => (
@@ -81,7 +81,7 @@ export function OperationLedger() {
               {operationLedger.length === 0 && (
                 <tr>
                   <td colSpan={7} className="py-3 text-center text-slate-500 text-[11px]">
-                    No operations yet — generate FLUX or make a withdrawal to populate the ledger.
+                    No operations yet — generate tokens or make a withdrawal to populate the ledger.
                   </td>
                 </tr>
               )}

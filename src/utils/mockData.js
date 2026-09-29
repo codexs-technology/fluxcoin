@@ -5,21 +5,25 @@
  * or a transaction. Balances/addresses come from `src/wallet/*` (real provider
  * reads) and ledger rows come from `src/api/client.js` (real backend records).
  *
- * The token presets mirror the 5 per-asset Flash contracts exactly (ids,
- * symbols and decimals must match src/contracts/assets.js).
+ * The token presets are DERIVED from src/contracts/assets.js — the single
+ * source of truth for asset ids/symbols/decimals — so the display list can
+ * never drift from what the API calls send (`asset: id` on every request).
  */
+import { FLASH_ASSETS } from '../contracts/assets.js';
 
 /**
- * The 5 forgeable assets — exactly five, no more, no less.
- * USDT is the default (tokens[0] = the pre-selected preset).
+ * The 5 forgeable assets — exactly five, no more, no less, generated from the
+ * registry (ids must match api/src/assets.ts). USDT is the default
+ * (tokens[0] = the pre-selected preset).
  */
-export const tokens = [
-  { id: 'usdt', name: 'Flash USDT', symbol: 'USDT', decimals: 6, type: 'ERC-20', color: '#26a17b' },
-  { id: 'btc', name: 'Flash Bitcoin', symbol: 'BTC', decimals: 8, type: 'ERC-20', color: '#f7931a' },
-  { id: 'eth', name: 'Flash Ethereum', symbol: 'ETH', decimals: 18, type: 'ERC-20', color: '#627eea' },
-  { id: 'trx', name: 'Flash TRX', symbol: 'TRX', decimals: 6, type: 'ERC-20', color: '#ef0027' },
-  { id: 'sol', name: 'Flash Solana', symbol: 'SOL', decimals: 9, type: 'ERC-20', color: '#9945ff' }
-];
+export const tokens = FLASH_ASSETS.map(({ id, name, symbol, decimals, color }) => ({
+  id,
+  name,
+  symbol,
+  decimals,
+  type: 'ERC-20',
+  color
+}));
 
 /**
  * Demo telemetry. These numbers are simulated for the dashboard look and are

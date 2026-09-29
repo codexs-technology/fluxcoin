@@ -1,6 +1,7 @@
 /**
- * Balance card: the on-site (earned) balance next to the real on-chain FLUX
- * balance. Both values come from real sources — no placeholder numbers:
+ * Balance card: the on-site (earned) balance next to the real on-chain token
+ * balance of the SELECTED asset. Both values come from real sources — no
+ * placeholder numbers:
  *   - site   -> GET /api/balance (backend ledger, authoritative for withdrawals)
  *   - onchain-> ERC-20 balanceOf() read through the connected provider / RPC
  */
@@ -23,6 +24,7 @@ export function CoinBalance() {
     signOut,
     tokenSymbol,
     tokenAddress,
+    tokenDecimals,
     tokenHint,
     apiOnline,
     backend,
@@ -35,8 +37,8 @@ export function CoinBalance() {
   return (
     <div className="space-y-2 font-mono">
       <div className="text-xs uppercase tracking-wider text-cyan-400/80 flex items-center justify-between">
-        <span>00 // FLUX Balance</span>
-        <span className="text-[10px] text-slate-500">{tokenAddress ? 'ERC-20 • 18d' : 'NOT DEPLOYED'}</span>
+        <span>00 // {tokenSymbol} Balance</span>
+        <span className="text-[10px] text-slate-500">{tokenAddress ? `ERC-20 • ${tokenDecimals}d` : 'NOT DEPLOYED'}</span>
       </div>
 
       <div className="p-3 rounded-md bg-slate-900/60 border border-slate-800 space-y-2">
@@ -67,7 +69,7 @@ export function CoinBalance() {
 
       {!isConnected && (
         <div className="p-2 rounded bg-slate-900/60 border border-slate-800 text-[10px] text-slate-400">
-          Connect a wallet to generate and withdraw FLUX. Your address is the destination of every withdrawal.
+          Connect a wallet to generate and withdraw {tokenSymbol}. Your address is the destination of every withdrawal.
         </div>
       )}
 

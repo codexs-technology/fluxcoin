@@ -231,7 +231,7 @@ npm run deploy:flash:sepolia
 | `SPONSORED_SETTLEMENT_FAILED` | Minter wallet me POL nahi hai (top up karo), ya minter ke paas `MINTER_ROLE` nahi (deploy script ne grant kiya tha — `.env.flash-assets.json` check karo). |
 | Balances reset ho rahe | KV namespace bind nahi hai (Step 6d). |
 | MetaMask "This site may be compromised" | MetaMask ka phishing-blocklist fluxcoin.pages.dev ko flag kar raha (code clean hai). Fix ke liye custom domain use karo (e.g. `fluxcoin.xyz` → Pages custom domain) — pages.dev subdomain MetaMask ke blocklist me aa sakta hai. Appeal bhi possible hai: https://github.com/MetaMask/phishing-detection — repo me issue kholo apne domain ke saath. |
-| `UNKNOWN_ASSET` API error | Purana frontend build bhej raha `asset: "forge"` — naya build deploy karo (Step 7). |
+| `UNKNOWN_ASSET` API error (`asset: "forge"`) | Frontend purane code se chal raha hai — ya to naya build deploy nahi hua (Step 7), ya dev server purane `.kilo/worktrees/*` folder se chal raha hai. Fix: root folder (`e:\Flush Coin`) se `npm run dev` / naya build deploy karo. |
 
 ## File reference (kya kahan hai)
 

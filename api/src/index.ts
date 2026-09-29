@@ -586,10 +586,11 @@ app.get('/api/withdraw/config', (c) => {
     defaultAsset: 'usdt',
     assets: assetSummary(config.assets),
     // Legacy single-token wiring (kept for old builds; the UI should use `assets`).
+    // Mirrors the default asset (USDT) instead of the removed FLUX token.
     token: {
-      address: config.chain.tokenAddress || null,
-      symbol: 'FLUX',
-      decimals: 18
+      address: config.assets.usdt?.address || config.chain.tokenAddress || null,
+      symbol: 'USDT',
+      decimals: 6
     },
     faucet: config.chain.faucetAddress || null,
     minTokens: config.limits.withdrawMinTokens,

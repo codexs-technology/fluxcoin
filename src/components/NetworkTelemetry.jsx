@@ -17,7 +17,7 @@ export function NetworkTelemetry() {
         </span>
       </div>
       <div className="text-[10px] font-mono text-slate-500 leading-snug">
-        These gauges are cosmetic dashboard numbers. Real values (wallet address, FLUX balances, gasless mode, tx hashes)
+        These gauges are cosmetic dashboard numbers. Real values (wallet address, token balances, gasless mode, tx hashes)
         are shown in the wallet, balance and ledger panels.
       </div>
 
