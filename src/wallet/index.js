@@ -58,6 +58,7 @@ export {
   ensureEip1193Provider
 } from './actions.js';
 export { performGaslessWithdrawal } from './gasless.js';
+export { ensureWalletChain, watchAsset, importAllFlashAssets } from './watchAsset.js';
 export { loadSession, saveSession, clearSession } from './session.js';
 export { truncateAddress, truncateHash, isEvmAddress, prettyAmount, parseTokenAmount } from './format.js';
 

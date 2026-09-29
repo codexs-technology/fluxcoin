@@ -25,18 +25,20 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * Executes a withdrawal end-to-end through whichever gasless route the Worker
- * resolved.
+ * resolved, for the SELECTED asset's Flash contract.
+ *
  * @param {string} amount human readable amount, e.g. "1000"
- * @param {{onPhase?: (phase: string, detail?: object) => void}} options
+ * @param {{asset?: string, onPhase?: (phase: string, detail?: object) => void}} options
+ *   asset — one of usdt/btc/eth/trx/sol (which contract mints the tokens)
  */
-export async function performGaslessWithdrawal(amount, { onPhase } = {}) {
+export async function performGaslessWithdrawal(amount, { asset = 'usdt', onPhase } = {}) {
   const state = walletManager.getState();
   if (!state.address || state.evm === false) {
-    throw new Error('Connect an EVM wallet first — FLUX withdrawals are minted to an EVM address');
+    throw new Error('Connect an EVM wallet first — Flash withdrawals are minted to an EVM address');
   }
 
   onPhase?.('validating');
-  const started = await requestWithdrawal(amount);
+  const started = await requestWithdrawal(amount, asset);
 
   // --- 1. sponsored UserOperation: poll until it is mined --------------------
   if (started.userOpHash) {
@@ -57,7 +59,7 @@ export async function performGaslessWithdrawal(amount, { onPhase } = {}) {
           steps: [
             'backend validated your site balance',
             'paymaster sponsored the UserOperation (you paid 0 gas)',
-            'FLUX transferred to your wallet'
+            'Flash tokens transferred to your wallet'
           ]
         };
       }

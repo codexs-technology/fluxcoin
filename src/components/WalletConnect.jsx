@@ -15,7 +15,8 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { useWallet } from '../hooks/useWallet';
-import { explorerAddressUrl } from '../wallet/chains.js';
+import { explorerAddressUrl, ACTIVE_CHAIN } from '../wallet/chains.js';
+import { importAllFlashAssets } from '../wallet/watchAsset.js';
 import WalletQrModal from './WalletQrModal';
 
 function formatNative(value) {
@@ -59,10 +60,35 @@ export function WalletConnect() {
   const [qrError, setQrError] = useState(null);
   const [busyId, setBusyId] = useState(null);
   const [copied, setCopied] = useState(false);
+  /** One-click "add all Flash tokens to the wallet" (EIP-747 watchAsset). */
+  const [importingTokens, setImportingTokens] = useState(false);
+  const [importResult, setImportResult] = useState(null);
 
   useEffect(() => {
     if (isQrOpen && pairingUri) setQrStatus('waiting');
   }, [isQrOpen, pairingUri]);
+
+  /**
+   * Switches the wallet to the Flash network (Polygon in production) and asks it
+   * to track every configured Flash token. User-initiated, so MetaMask shows its
+   * own native "import token" popups — exactly the flow it trusts.
+   */
+  const handleImportTokens = useCallback(async () => {
+    setImportingTokens(true);
+    setImportResult(null);
+    try {
+      const result = await importAllFlashAssets();
+      const parts = [];
+      if (result.imported.length) parts.push(`imported: ${result.imported.join(', ')}`);
+      if (result.skipped.length) parts.push(`skipped: ${result.skipped.join(', ')}`);
+      if (result.failed.length) parts.push(`failed: ${result.failed.join('; ')}`);
+      setImportResult(parts.join(' • ') || 'nothing to import');
+    } catch (importError) {
+      setImportResult(importError.message || 'Token import failed');
+    } finally {
+      setImportingTokens(false);
+    }
+  }, []);
 
   const handleInjectedConnect = useCallback(
     async (entry) => {
@@ -193,6 +219,16 @@ export function WalletConnect() {
               DISCONNECT
             </button>
           </div>
+
+          {/* Make the minted Flash tokens visible in MetaMask & friends (EIP-747). */}
+          <button
+            onClick={handleImportTokens}
+            disabled={importingTokens}
+            className="w-full text-[10px] font-mono px-2 py-1.5 rounded bg-cyan-950/50 hover:bg-cyan-900/60 border border-cyan-500/40 text-cyan-300 disabled:opacity-50 transition-colors"
+          >
+            {importingTokens ? 'IMPORTING TOKENS…' : `IMPORT FLASH TOKENS (${ACTIVE_CHAIN.shortName})`}
+          </button>
+          {importResult && <div className="text-[9px] font-mono text-slate-500 leading-snug">{importResult}</div>}
         </div>
       ) : (
         <button
@@ -310,7 +346,7 @@ export function WalletConnect() {
                   ))}
                 </div>
                 <div className="text-[10px] font-mono text-slate-500 mt-1">
-                  Withdrawals are minted as ERC-20 FLUX, so an EVM wallet is required for that step.
+                  Withdrawals are minted as ERC-20 Flash tokens (USDT/BTC/ETH/TRX/SOL), so an EVM wallet is required for that step.
                 </div>
               </div>
             )}

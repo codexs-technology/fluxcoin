@@ -19,9 +19,14 @@ const PHASE_LABELS = {
   validating: 'Backend validating your earned balance…',
   'awaiting-signature': 'Confirm the FREE signature in your wallet…',
   estimating: 'Estimating the sponsored UserOperation…',
-  relaying: 'Relayer submitting the transaction (you pay 0 gas)…',
-  confirmed: 'Confirmed — FLUX minted to your wallet.'
+  relaying: 'Relayer submitting the transaction (you pay 0 gas)…'
 };
+
+/** The confirmed label names the asset that was actually minted. */
+function phaseLabel(phase, symbol) {
+  if (phase === 'confirmed') return `Confirmed — ${symbol} minted to your wallet.`;
+  return PHASE_LABELS[phase] || `Processing (${phase})…`;
+}
 
 export function WithdrawPanel() {
   const { isConnected, truncatedAddress, networkName, isEvm } = useWallet();
@@ -77,7 +82,9 @@ export function WithdrawPanel() {
   return (
     <div className="space-y-3 font-mono">
       <div className="flex items-center justify-between pb-1 border-b border-slate-800">
-        <span className="text-xs font-bold text-cyan-400 uppercase tracking-wider">WITHDRAW FLUX — ZERO GAS</span>
+        <span className="text-xs font-bold text-cyan-400 uppercase tracking-wider">
+          WITHDRAW {tokenSymbol} — ZERO GAS
+        </span>
         <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-950/60 text-emerald-400 border border-emerald-500/40">
           USER GAS: 0
         </span>
@@ -92,7 +99,7 @@ export function WithdrawPanel() {
 
       {isConnected && !isEvm && (
         <div className="p-3 rounded bg-amber-950/30 border border-amber-500/40 text-[11px] text-amber-300">
-          The connected wallet is a Solana wallet. FLUX withdrawals are minted as ERC-20 on {networkName}, so connect an
+          The connected wallet is a Solana wallet. Flash withdrawals are minted as ERC-20 on {networkName}, so connect an
           EVM wallet to withdraw.
         </div>
       )}
@@ -152,7 +159,7 @@ export function WithdrawPanel() {
           )}
           {withdrawPhase && (
             <div className="p-2 rounded bg-cyan-950/30 border border-cyan-500/40 text-[11px] text-cyan-300 animate-pulse">
-              {PHASE_LABELS[withdrawPhase] || `Processing (${withdrawPhase})…`}
+              {phaseLabel(withdrawPhase, tokenSymbol)}
             </div>
           )}
 

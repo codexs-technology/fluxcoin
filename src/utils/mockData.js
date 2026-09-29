@@ -5,17 +5,20 @@
  * or a transaction. Balances/addresses come from `src/wallet/*` (real provider
  * reads) and ledger rows come from `src/api/client.js` (real backend records).
  *
- * The old `walletProviders` array (a hardcoded list that made every button connect
- * the same random provider) is gone — installed wallets are discovered via
- * EIP-6963 in `src/wallet/eip6963.js`.
+ * The token presets mirror the 5 per-asset Flash contracts exactly (ids,
+ * symbols and decimals must match src/contracts/assets.js).
  */
 
-/** Visual presets for the forge animation. FLUX is the real, withdrawable coin. */
+/**
+ * The 5 forgeable assets — exactly five, no more, no less.
+ * USDT is the default (tokens[0] = the pre-selected preset).
+ */
 export const tokens = [
-  { id: 'flux', name: 'FluxCoin', symbol: 'FLUX', decimals: 18, type: 'ERC-20', color: '#00f0ff', live: true },
-  { id: 'usdt', name: 'Tether USD', symbol: 'USDT', decimals: 6, type: 'ERC-20', color: '#26a17b', live: false },
-  { id: 'eth', name: 'Ethereum', symbol: 'ETH', decimals: 18, type: 'Native', color: '#627eea', live: false },
-  { id: 'wbtc', name: 'Wrapped BTC', symbol: 'WBTC', decimals: 8, type: 'ERC-20', color: '#f7931a', live: false }
+  { id: 'usdt', name: 'Flash USDT', symbol: 'USDT', decimals: 6, type: 'ERC-20', color: '#26a17b' },
+  { id: 'btc', name: 'Flash Bitcoin', symbol: 'BTC', decimals: 8, type: 'ERC-20', color: '#f7931a' },
+  { id: 'eth', name: 'Flash Ethereum', symbol: 'ETH', decimals: 18, type: 'ERC-20', color: '#627eea' },
+  { id: 'trx', name: 'Flash TRX', symbol: 'TRX', decimals: 6, type: 'ERC-20', color: '#ef0027' },
+  { id: 'sol', name: 'Flash Solana', symbol: 'SOL', decimals: 9, type: 'ERC-20', color: '#9945ff' }
 ];
 
 /**

@@ -128,11 +128,16 @@ export async function ensureSession() {
 
 // --- endpoints ---------------------------------------------------------------
 
-/** Earned (site) balance + real on-chain balance for the signed-in wallet. */
-export function fetchBalance(address = null) {
+/**
+ * Earned (site) balance + real on-chain balance for the signed-in wallet.
+ * `asset` (usdt/btc/eth/trx/sol) selects which Flash contract is read; it
+ * defaults to the backend's default asset when omitted.
+ */
+export function fetchBalance(address = null, asset = null) {
   const targetAddress = address || walletManager.getAddress();
-  if (targetAddress) return request(`/api/balance/${targetAddress}`);
-  return request('/api/balance');
+  const query = asset ? `?asset=${encodeURIComponent(asset)}` : '';
+  if (targetAddress) return request(`/api/balance/${targetAddress}${query}`);
+  return request(`/api/balance${query}`);
 }
 
 /** Audit trail (credits + withdrawals) for the signed-in wallet. */
@@ -141,8 +146,8 @@ export function fetchLedger() {
 }
 
 /**
- * Credits earned coins. The Worker owns the limits (min/max, cooldown, daily
- * cap) — the browser amount is only a request.
+ * Credits earned coins of the selected asset. The Worker owns the limits
+ * (min/max, cooldown, daily cap) — the browser amount is only a request.
  */
 export function claimEarn(amount, { asset, source } = {}) {
   return request('/api/forge', {
@@ -150,7 +155,8 @@ export function claimEarn(amount, { asset, source } = {}) {
     body: JSON.stringify({
       address: walletManager.getAddress(),
       quantity: String(amount),
-      asset: asset || source || 'forge'
+      asset: asset || 'usdt',
+      source: source || 'forge'
     })
   });
 }
@@ -164,11 +170,18 @@ export function fetchWithdrawHistory(limit = 25) {
   return request(`/api/withdraw/history?limit=${limit}`);
 }
 
-/** Starts a withdrawal: the Worker validates, reserves and settles gas-free. */
-export function requestWithdrawal(amount) {
+/**
+ * Starts a withdrawal of ONE asset: the Worker validates, reserves and settles
+ * gas-free from that asset's Flash contract (usdt/btc/eth/trx/sol).
+ */
+export function requestWithdrawal(amount, asset = 'usdt') {
   return request('/api/withdraw', {
     method: 'POST',
-    body: JSON.stringify({ address: walletManager.getAddress(), amount: String(amount) })
+    body: JSON.stringify({
+      address: walletManager.getAddress(),
+      amount: String(amount),
+      asset
+    })
   });
 }
 

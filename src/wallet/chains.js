@@ -65,10 +65,11 @@ export const SUPPORTED_NETWORKS = CHAIN_LIST.reduce((map, chain) => {
   return map;
 }, {});
 
-/** Chain the token/faucet contracts live on (set VITE_NETWORK_ID after deployment). */
-export const ACTIVE_CHAIN_ID = Number(env.VITE_NETWORK_ID || 11155111);
+/** Chain the Flash contracts live on — Polygon (137) is the production network. */
+export const ACTIVE_CHAIN_ID = Number(env.VITE_NETWORK_ID || 137);
 
-export const ACTIVE_CHAIN = SUPPORTED_NETWORKS[ACTIVE_CHAIN_ID] || CHAIN_LIST[0];
+/** Fallback is Polygon (production chain), never an unrelated first entry. */
+export const ACTIVE_CHAIN = SUPPORTED_NETWORKS[ACTIVE_CHAIN_ID] || SUPPORTED_NETWORKS[137];
 
 export function getChain(chainId) {
   return SUPPORTED_NETWORKS[Number(chainId)] || null;

@@ -16,7 +16,7 @@ import { truncateAddress, truncateHash } from '../wallet/format.js';
  */
 export const useAppStore = create((set, get) => ({
   // --- left panel -----------------------------------------------------------
-  selectedToken: tokens[0], // FLUX
+  selectedToken: tokens[0], // USDT — the default asset preset (5 total)
   customTokenName: '',
   connectedWallet: null,
   isConnectingWallet: false,
@@ -89,22 +89,26 @@ export const useAppStore = create((set, get) => ({
   /** Replaces the audit trail with the backend ledger (real records only). */
   setLedger: (entries) =>
     set({
-      operationLedger: (entries || []).map((entry) => ({
-        id: entry.id,
-        time: entry.createdAt ? new Date(entry.createdAt).toISOString().slice(11, 19) + ' UTC' : '—',
-        op: entry.type === 'withdraw' ? 'WITHDRAW_FLUX' : 'EARN_FLUX',
-        asset: 'FLUX',
-        value: entry.amountTokens,
-        fee: entry.type === 'withdraw' ? 'GAS: 0 (sponsored)' : 'FREE',
-        tx: entry.txHash ? truncateHash(entry.txHash, 10, 6) : entry.id,
-        txHash: entry.txHash || null,
-        status: entry.status
-      })),
+      operationLedger: (entries || []).map((entry) => {
+        // Each row is per-asset now: EARN_USDT / WITHDRAW_BTC / ... (legacy rows -> FLUX).
+        const asset = String(entry.asset || 'flux').toUpperCase();
+        return {
+          id: entry.id,
+          time: entry.createdAt ? new Date(entry.createdAt).toISOString().slice(11, 19) + ' UTC' : '—',
+          op: entry.type === 'withdraw' ? `WITHDRAW_${asset}` : `EARN_${asset}`,
+          asset,
+          value: entry.amountTokens,
+          fee: entry.type === 'withdraw' ? 'GAS: 0 (sponsored)' : 'FREE',
+          tx: entry.txHash ? truncateHash(entry.txHash, 10, 6) : entry.id,
+          txHash: entry.txHash || null,
+          status: entry.status
+        };
+      }),
       withdrawalQueue: (entries || [])
         .filter((entry) => entry.type === 'withdraw' && ['PENDING', 'PROCESSING', 'RESERVED'].includes(entry.status))
         .map((entry) => ({
           id: entry.id,
-          asset: 'FLUX',
+          asset: String(entry.asset || 'flux').toUpperCase(),
           amount: entry.amountTokens,
           dest: get().connectedWallet?.truncated || '—',
           eta: '—',
@@ -163,7 +167,7 @@ export const useAppStore = create((set, get) => ({
    */
   triggerTokenForge: async (earnFn) => {
     const { mintQuantity, selectedToken, customTokenName } = get();
-    const label = customTokenName.trim() ? customTokenName.toUpperCase().slice(0, 8) : 'FLUX';
+    const label = customTokenName.trim() ? customTokenName.toUpperCase().slice(0, 8) : selectedToken.symbol;
 
     if (typeof earnFn !== 'function') {
       const message = 'Sign in with your wallet first — earnings are credited to your real address.';
@@ -174,7 +178,10 @@ export const useAppStore = create((set, get) => ({
 
     set({ isForging: true, forgeProgress: 12, forgeError: null });
     sound.playForge();
-    get().addLog(`[FORGE] Requesting ${mintQuantity} FLUX credit for ${selectedToken.symbol} preset (${label})...`, 'warn');
+    get().addLog(
+      `[FORGE] Requesting ${mintQuantity} ${selectedToken.symbol} credit for the ${selectedToken.name} preset (${label})...`,
+      'warn'
+    );
 
     const step1 = setTimeout(() => {
       set({ forgeProgress: 55 });
@@ -205,8 +212,8 @@ export const useAppStore = create((set, get) => ({
       get().addOperation({
         id: entry.id || `EARN-${Date.now()}`,
         time: new Date(entry.createdAt || Date.now()).toISOString().slice(11, 19) + ' UTC',
-        op: 'EARN_FLUX',
-        asset: 'FLUX',
+        op: `EARN_${selectedToken.symbol}`,
+        asset: selectedToken.symbol,
         value: entry.amountTokens || String(mintQuantity),
         fee: 'FREE',
         tx: entry.id || '—',
@@ -215,7 +222,7 @@ export const useAppStore = create((set, get) => ({
       });
 
       get().addLog(
-        `[FORGE_SUCCESS] Credited ${entry.amountTokens || mintQuantity} FLUX to your site balance (ref ${entry.id || 'n/a'}).`,
+        `[FORGE_SUCCESS] Credited ${entry.amountTokens || mintQuantity} ${selectedToken.symbol} to your site balance (ref ${entry.id || 'n/a'}).`,
         'success'
       );
 

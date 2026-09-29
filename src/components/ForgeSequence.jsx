@@ -151,7 +151,7 @@ export function ForgeSequence() {
 
       <div className="text-[10px] text-center font-mono text-slate-500 leading-snug">
         {isSignedIn
-          ? `Earnings are credited to your signed-in wallet on ${selectedToken.symbol} preset ${tokenSymbolLabel}. Withdraw them as real ERC-20 FLUX with 0 gas from the withdrawal tab.`
+          ? `Earnings are credited to your signed-in wallet on the ${selectedToken.symbol} preset ${tokenSymbolLabel}. Withdraw them as real ERC-20 ${tokenSymbol} with 0 gas from the withdrawal tab.`
           : isConnected
             ? 'Generating will ask you to sign one free login message, then credits your real address.'
             : 'Connect a wallet (extension, WalletConnect QR or AppKit) to credit earnings to your real address.'}

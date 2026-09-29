@@ -62,7 +62,7 @@ export default function App() {
       <div className="flex items-center space-x-2 mb-5 overflow-x-auto pb-1">
         {[
           { id: 'forge', label: '01 // FLASH FORGE & 3D' },
-          { id: 'withdraw', label: '02 // WITHDRAW FLUX (0 GAS)' },
+          { id: 'withdraw', label: '02 // WITHDRAW ASSETS (0 GAS)' },
           { id: 'transfer', label: '03 // FLASH TRANSFER' },
           { id: 'swap', label: '04 // DEX SWAP' },
           { id: 'trade', label: '05 // ORDERBOOK TRADE' }

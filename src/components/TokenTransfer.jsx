@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 import { useWallet } from '../hooks/useWallet';
 import { useToken } from '../hooks/useToken';
+import { useAppStore } from '../store/useAppStore';
 import { explorerTxUrl } from '../wallet/chains.js';
-import { TOKEN_ADDRESS, TOKEN_SYMBOL, explorerTokenUrl } from '../contracts/addresses.js';
+import { getFlashAsset } from '../contracts/assets.js';
+import { explorerTokenUrl } from '../contracts/addresses.js';
 
 /**
- * Real ERC-20 transfer UI.
+ * Real ERC-20 transfer UI for the SELECTED Flash asset (USDT/BTC/ETH/TRX/SOL).
  *
  * The previous version generated a mock transaction hash whenever no wallet was
  * connected ("TRANSFER_CONFIRMED" with a random 0x… string). Now a transfer either
@@ -13,7 +15,9 @@ import { TOKEN_ADDRESS, TOKEN_SYMBOL, explorerTokenUrl } from '../contracts/addr
  */
 export default function TokenTransfer() {
   const { isConnected, isEvm, chainId } = useWallet();
-  const { balance, refreshBalance, transfer } = useToken(TOKEN_ADDRESS);
+  const selectedToken = useAppStore((s) => s.selectedToken);
+  const asset = getFlashAsset(selectedToken?.id);
+  const { balance, refreshBalance, transfer } = useToken(asset.address, asset.decimals, asset.symbol);
 
   const [recipient, setRecipient] = useState('');
   const [amount, setAmount] = useState('');
@@ -27,11 +31,11 @@ export default function TokenTransfer() {
     setTxHash('');
 
     if (!isConnected || !isEvm) {
-      setFormError('Connect an EVM wallet before transferring FLUX.');
+      setFormError(`Connect an EVM wallet before transferring ${asset.symbol}.`);
       return;
     }
-    if (!TOKEN_ADDRESS) {
-      setFormError('VITE_TOKEN_ADDRESS is not configured — deploy the contracts first (see README).');
+    if (!asset.address) {
+      setFormError(`VITE_TOKEN_ADDRESS_${asset.id.toUpperCase()} is not configured — deploy the Flash contracts first (see DEPLOYMENT.md).`);
       return;
     }
     if (!recipient || !amount || Number(amount) <= 0) {
@@ -52,14 +56,14 @@ export default function TokenTransfer() {
     }
   };
   const explorerUrl = txHash ? explorerTxUrl(txHash, chainId) : null;
-  const tokenUrl = explorerTokenUrl(TOKEN_ADDRESS);
+  const tokenUrl = explorerTokenUrl(asset.address);
 
   return (
     <div className="space-y-3 font-mono">
       <div className="flex items-center justify-between pb-1 border-b border-slate-800">
-        <span className="text-xs font-bold text-cyan-400 uppercase tracking-wider">TRANSFER {TOKEN_SYMBOL} TOKENS</span>
+        <span className="text-xs font-bold text-cyan-400 uppercase tracking-wider">TRANSFER {asset.symbol} TOKENS</span>
         <span className="text-[10px] text-slate-500">
-          ERC-20 / {balance === null ? '—' : balance} {TOKEN_SYMBOL}
+          ERC-20 / {balance === null ? '—' : balance} {asset.symbol}
         </span>
       </div>
 
@@ -77,7 +81,7 @@ export default function TokenTransfer() {
 
         <div>
           <div className="flex justify-between text-[10px] text-slate-400 mb-1">
-            <span>Amount ({TOKEN_SYMBOL})</span>
+            <span>Amount ({asset.symbol})</span>
             <button type="button" onClick={() => setAmount(balance || '')} className="text-cyan-400 hover:text-white">
               USE MAX
             </button>
@@ -91,14 +95,14 @@ export default function TokenTransfer() {
               onChange={(event) => setAmount(event.target.value)}
               className="w-full bg-[#070d14] border border-slate-800 focus:border-cyan-400 rounded p-2 text-xs text-white focus:outline-none font-bold"
             />
-            <div className="absolute right-2 top-2 text-[10px] text-cyan-400">{TOKEN_SYMBOL}</div>
+            <div className="absolute right-2 top-2 text-[10px] text-cyan-400">{asset.symbol}</div>
           </div>
         </div>
 
         <div>
           <label className="text-[10px] text-slate-500 uppercase block mb-1">Token Contract (from .env)</label>
           <div className="w-full bg-[#070d14] border border-slate-800 rounded p-1.5 text-[10px] text-slate-400 break-all">
-            {TOKEN_ADDRESS || 'not configured — run contracts/scripts/deploy.js and set VITE_TOKEN_ADDRESS'}
+            {asset.address || `not configured — run contracts/scripts/deployFlashAssets.js and set VITE_TOKEN_ADDRESS_${asset.id.toUpperCase()}`}
           </div>
         </div>
 
@@ -113,7 +117,7 @@ export default function TokenTransfer() {
           disabled={loading || !recipient || !amount}
           className="w-full py-2.5 rounded bg-cyan-950/60 hover:bg-cyan-900/80 border border-cyan-500/50 text-cyan-300 font-bold text-xs uppercase tracking-wider transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-[0_0_10px_rgba(0,240,255,0.15)]"
         >
-          {loading ? 'BROADCASTING TO MEMPOOL…' : 'EXECUTE FLUX TRANSFER'}
+          {loading ? 'BROADCASTING TO MEMPOOL…' : `EXECUTE ${asset.symbol} TRANSFER`}
         </button>
 
         <div className="text-[10px] text-slate-500 leading-snug">

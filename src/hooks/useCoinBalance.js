@@ -1,14 +1,17 @@
 /**
  * useCoinBalance — the bridge between the site's *earned* balance and the real
- * on-chain FLUX ERC-20.
+ * per-asset Flash ERC-20 contracts (Flash USDT/BTC/ETH/TRX/SOL on Polygon).
  *
  * Flow implemented here (all values come from the backend, never from the browser):
  *  1. `signIn()`   -> SIWE-style signature by the connected wallet (POST /api/auth/*)
- *  2. `earn()`     -> POST /api/forge credits the on-site balance
+ *                     — ALWAYS user-initiated (a button click); no auto sign-in
+ *                     effect, so MetaMask never shows a surprise signature request.
+ *  2. `earn()`     -> POST /api/forge credits the on-site balance of the SELECTED asset
  *  3. `withdraw()` -> POST /api/withdraw validates "never more than the site balance",
- *                     reserves it, and settles real FLUX to the connected address via
- *                     whichever GASLESS route the Worker resolved (the user pays 0 gas —
- *                     see src/wallet/gasless.js and api/src/withdraw.ts).
+ *                     reserves it, and settles real Flash tokens to the connected
+ *                     address from that asset's contract — whichever GASLESS route
+ *                     the Worker resolved (the user pays 0 gas). After a successful
+ *                     mint the wallet is asked to track the token (EIP-747 watchAsset).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
@@ -21,17 +24,19 @@ import {
   fetchBalance,
   fetchLedger,
   fetchWithdrawConfig,
-  hasValidSession,
-  loginWithWallet
+  hasValidSession
 } from '../api/client.js';
 import { performGaslessWithdrawal } from '../wallet/gasless.js';
 import { readTokenBalance } from '../wallet/token.js';
 import { explorerTxUrl } from '../wallet/chains.js';
-import { TOKEN_ADDRESS, TOKEN_DECIMALS, TOKEN_SYMBOL, isTokenConfigured, tokenConfigHint } from '../contracts/addresses.js';
+import { watchAsset } from '../wallet/watchAsset.js';
+import { getFlashAsset } from '../contracts/assets.js';
 
 export function useCoinBalance() {
   const address = useAppStore((s) => s.connectedWallet?.address || null);
   const chainId = useAppStore((s) => s.connectedWallet?.chainId || null);
+  /** The selected preset (usdt/btc/eth/trx/sol) decides WHICH Flash contract earns + mints. */
+  const selectedToken = useAppStore((s) => s.selectedToken);
   const setSiteBalance = useAppStore((s) => s.setSiteBalance);
   const setOnchainBalance = useAppStore((s) => s.setOnchainBalance);
   const setWithdrawConfig = useAppStore((s) => s.setWithdrawConfig);
@@ -52,20 +57,34 @@ export function useCoinBalance() {
   /** Wallet (lowercased) that must not be auto-signed-in again (manual sign-out / refusal). */
   const autoSignInBlock = useRef(null);
 
-  const tokenHint = useMemo(() => tokenConfigHint(), []);
+  /** Resolved Flash asset for the selected preset (address/symbol/decimals/configured). */
+  const activeAsset = useMemo(() => getFlashAsset(selectedToken?.id), [selectedToken]);
 
-  /** Real on-chain FLUX balance straight from the chain (works without signing in). */
+  const tokenHint = useMemo(
+    () =>
+      activeAsset.configured
+        ? null
+        : `${activeAsset.symbol} contract address is not set — deploy the 5 Flash contracts (contracts/scripts/deployFlashAssets.js) and fill VITE_TOKEN_ADDRESS_${activeAsset.id.toUpperCase()} in the root .env.`,
+    [activeAsset]
+  );
+
+  /** Real on-chain balance of the SELECTED asset (works without signing in). */
   const refreshOnchain = useCallback(async () => {
-    if (!address || !isTokenConfigured()) return null;
+    if (!address || !activeAsset.configured) return null;
     try {
-      const balance = await readTokenBalance(TOKEN_ADDRESS, address);
-      setOnchainBalance({ balanceTokens: balance, symbol: TOKEN_SYMBOL, decimals: TOKEN_DECIMALS, tokenAddress: TOKEN_ADDRESS });
+      const balance = await readTokenBalance(activeAsset.address, address);
+      setOnchainBalance({
+        balanceTokens: balance,
+        symbol: activeAsset.symbol,
+        decimals: activeAsset.decimals,
+        tokenAddress: activeAsset.address
+      });
       return balance;
     } catch (readError) {
-      addLog(`[FLUX] On-chain balance read failed: ${readError.message}`, 'warn');
+      addLog(`[${activeAsset.symbol}] On-chain balance read failed: ${readError.message}`, 'warn');
       return null;
     }
-  }, [address, addLog, setOnchainBalance]);
+  }, [activeAsset, address, addLog, setOnchainBalance]);
 
   /** Site balance + audit trail (needs the signed session). */
   const refresh = useCallback(async () => {
@@ -90,7 +109,7 @@ export function useCoinBalance() {
       setIsSignedIn(signedIn);
       if (!signedIn) return null; // balances stay hidden until the wallet signs in
 
-      const [balance, ledger] = await Promise.all([fetchBalance(), fetchLedger()]);
+      const [balance, ledger] = await Promise.all([fetchBalance(address, activeAsset.id), fetchLedger()]);
       setSiteBalance(balance.site);
       setOnchainBalance(balance.onchain);
       setLedger(ledger.entries);
@@ -111,7 +130,7 @@ export function useCoinBalance() {
     } finally {
       setIsLoading(false);
     }
-  }, [address, refreshOnchain, setLedger, setOnchainBalance, setSiteBalance, setWithdrawConfig]);
+  }, [activeAsset, address, refreshOnchain, setLedger, setOnchainBalance, setSiteBalance, setWithdrawConfig]);
 
   /** Signs the login nonce with the connected wallet (proves address ownership). */
   const signIn = useCallback(async () => {
@@ -145,14 +164,14 @@ export function useCoinBalance() {
     addLog(`[AUTH] Signed out of FluxCoin.`, 'info');
   }, [addLog, address, setLedger, setSiteBalance]);
 
-  /** Generates (earns) coins into the site balance. Server-side limits apply. */
+  /** Generates (earns) coins of the SELECTED asset into its site balance. Server-side limits apply. */
   const earn = useCallback(
     async (amount) => {
       if (!address) throw new Error('Connect an EVM wallet first');
       await ensureSession();
       setIsSignedIn(true);
       try {
-        const result = await claimEarn(amount, { source: 'forge' });
+        const result = await claimEarn(amount, { asset: activeAsset.id, source: 'forge' });
         if (result?.site) setSiteBalance(result.site);
         return result;
       } catch (claimError) {
@@ -160,12 +179,15 @@ export function useCoinBalance() {
         throw claimError;
       }
     },
-    [address, setSiteBalance]
+    [activeAsset, address, setSiteBalance]
   );
 
   /**
-   * Withdraws earned coins as real FLUX tokens, gas-free.
+   * Withdraws earned coins of the SELECTED asset as real Flash tokens, gas-free.
    * The amount can never exceed the site balance (checked here AND server-side).
+   * After a real (non-simulated) mint the wallet is asked to track the token so
+   * it shows up in MetaMask (EIP-747 wallet_watchAsset) — that prompt is the
+   * user's own "import token" popup and can be dismissed safely.
    */
   const withdraw = useCallback(
     async (amount, { onPhase } = {}) => {
@@ -176,7 +198,7 @@ export function useCoinBalance() {
 
       const available = Number(useAppStore.getState().siteBalance?.availableTokens || 0);
       if (parsed > available) {
-        const message = `You cannot withdraw more than your earned site balance (${available} ${TOKEN_SYMBOL} available)`;
+        const message = `You cannot withdraw more than your earned site balance (${available} ${activeAsset.symbol} available)`;
         addLog(`[WITHDRAW_ERR] ${message}`, 'error');
         throw new Error(message);
       }
@@ -189,7 +211,7 @@ export function useCoinBalance() {
       const localId = `local-${Date.now()}`;
       pushWithdrawalPending({
         id: localId,
-        asset: TOKEN_SYMBOL,
+        asset: activeAsset.symbol,
         amount: String(amount),
         dest: useAppStore.getState().connectedWallet?.truncated || address,
         eta: '~30s',
@@ -199,6 +221,7 @@ export function useCoinBalance() {
       let succeeded = false;
       try {
         const result = await performGaslessWithdrawal(String(amount), {
+          asset: activeAsset.id,
           onPhase: (phase, detail) => {
             setWithdrawPhase(phase);
             onPhase?.(phase, detail);
@@ -211,8 +234,8 @@ export function useCoinBalance() {
         const row = {
           id: result.reservationId || localId,
           time: new Date().toISOString().slice(11, 19) + ' UTC',
-          op: 'WITHDRAW_FLUX',
-          asset: TOKEN_SYMBOL,
+          op: `WITHDRAW_${activeAsset.symbol}`,
+          asset: activeAsset.symbol,
           value: result.amount || String(amount),
           fee: 'GAS: 0 (sponsored)',
           tx: txHash ? `${txHash.slice(0, 14)}…` : status,
@@ -228,10 +251,22 @@ export function useCoinBalance() {
           userGasCost: '0'
         });
         addLog(
-          `[WITHDRAW_OK] ${result.amount || amount} ${TOKEN_SYMBOL} minted to ${useAppStore.getState().connectedWallet?.truncated || address} — you paid 0 gas.`,
+          `[WITHDRAW_OK] ${result.amount || amount} ${activeAsset.symbol} minted to ${useAppStore.getState().connectedWallet?.truncated || address} — you paid 0 gas.`,
           'success'
         );
         succeeded = true;
+
+        // Real mint -> make the token VISIBLE in the wallet (non-fatal, user may skip).
+        if (!result.simulated && activeAsset.configured) {
+          watchAsset(activeAsset)
+            .then((added) => {
+              if (added) addLog(`[WALLET] ${activeAsset.symbol} added to your wallet token list.`, 'success');
+            })
+            .catch((watchError) =>
+              addLog(`[WALLET] Could not add ${activeAsset.symbol} to the wallet list: ${watchError.message}`, 'warn')
+            );
+        }
+
         await refresh();
         return result;
       } catch (withdrawError) {
@@ -243,52 +278,17 @@ export function useCoinBalance() {
         setWithdrawPhase(succeeded ? 'confirmed' : null);
       }
     },
-    [addLog, address, pushWithdrawalPending, refresh, resolveWithdrawal, setSiteBalance]
+    [activeAsset, addLog, address, pushWithdrawalPending, refresh, resolveWithdrawal, setSiteBalance]
   );
 
   // Load the config on mount (no session needed) and the balance whenever the
-  // connected address changes. Signing in happens on demand to avoid surprising
-  // signature prompts on page load.
+  // connected address OR the selected asset changes. Signing in happens ONLY on
+  // an explicit user action (SIGN IN button / GENERATE / WITHDRAW) — there is
+  // deliberately NO auto sign-in effect, because a surprise personal_sign popup
+  // on page load is exactly what makes MetaMask flag a site as "high-risk".
   useEffect(() => {
     refresh().catch(() => null);
   }, [refresh]);
-
-  /**
-   * Auto sign-in: as soon as a wallet is connected and the Worker answers
-   * /api/health, a session is opened once for that address (a stored token is
-   * reused, otherwise the wallet signs the login message). The earned balance
-   * therefore loads as soon as a wallet exists instead of waiting for a click.
-   * Failures are surfaced in the error banner, never thrown at the user.
-   */
-  useEffect(() => {
-    const key = address ? address.toLowerCase() : null;
-    // A different wallet clears an earlier block (manual sign-out / refusal).
-    if (autoSignInBlock.current && autoSignInBlock.current !== key) autoSignInBlock.current = null;
-    if (!key || isSignedIn || apiOnline !== true) return;
-    if (autoSignInBlock.current === key) return;
-
-    let cancelled = false;
-    loginWithWallet()
-      .then((session) => {
-        if (cancelled) return;
-        setIsSignedIn(true);
-        addLog(
-          `[AUTH] Session opened for ${address}${session?.signatureVerified ? ' (signature verified by the API)' : ''}.`,
-          'info'
-        );
-        refresh().catch(() => null);
-      })
-      .catch((authError) => {
-        if (cancelled) return;
-        // Block this wallet until the user asks again, so we never nag.
-        autoSignInBlock.current = key;
-        setError(authError.message || 'The wallet did not complete the sign-in');
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [address, apiOnline, isSignedIn, addLog, refresh]);
 
   useEffect(() => {
     if (!address) return;
@@ -313,11 +313,11 @@ export function useCoinBalance() {
     availableTokens: site?.availableTokens || '0',
     canWithdraw: Boolean(address && isSignedIn && Number(site?.availableTokens || 0) > 0),
 
-    // token wiring
-    tokenAddress: TOKEN_ADDRESS,
-    tokenSymbol: TOKEN_SYMBOL,
-    tokenDecimals: TOKEN_DECIMALS,
-    isTokenConfigured: isTokenConfigured(),
+    // token wiring (per selected asset)
+    tokenAddress: activeAsset.address,
+    tokenSymbol: activeAsset.symbol,
+    tokenDecimals: activeAsset.decimals,
+    isTokenConfigured: activeAsset.configured,
     tokenHint,
 
     // status

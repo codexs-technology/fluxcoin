@@ -7,11 +7,13 @@
  * the reservation, the coins are refunded so the balance can never be lost.
  */
 import { parseUnits, type Address, type Hex } from 'viem';
-import { explorerTxUrl, resolveGaslessMode, type FluxConfig } from './config.js';
+import { assetLimits, explorerTxUrl, weiToTokens, type FluxConfig } from './config.js';
+import type { AssetConfig } from './assets.js';
 import { settleServerSponsored } from './chain.js';
 import { executeGaslessWithdrawal, getUserOpReceipt } from './paymaster.js';
 import {
   getAccount,
+  getAssetAccount,
   listEntries,
   refundWithdrawal,
   reserveWithdrawal,
@@ -24,33 +26,40 @@ export type AmountParse =
   | { ok: true; wei: bigint; display: string }
   | { ok: false; error: string; message: string };
 
-/** Human amount -> wei. Rejects negatives, NaN and more than 18 decimals. */
-export function parseAmount(amount: unknown): AmountParse {
+/** Human amount -> base units of the ASSET (USDT 6d, BTC 8d, ETH 18d, …). */
+export function parseAmount(amount: unknown, decimals: number = 18): AmountParse {
   if (amount === undefined || amount === null || amount === '') {
     return { ok: false, error: 'AMOUNT_REQUIRED', message: 'Enter a withdrawal amount' };
   }
 
   const text = String(amount).trim();
   if (!/^\d+(\.\d+)?$/.test(text)) {
-    return { ok: false, error: 'INVALID_AMOUNT', message: 'Enter a valid positive amount with at most 18 decimals' };
+    return { ok: false, error: 'INVALID_AMOUNT', message: `Enter a valid positive amount with at most ${decimals} decimals` };
   }
-  if ((text.split('.')[1] || '').length > 18) {
-    return { ok: false, error: 'TOO_MANY_DECIMALS', message: 'FLUX has 18 decimals' };
+  if ((text.split('.')[1] || '').length > decimals) {
+    return { ok: false, error: 'TOO_MANY_DECIMALS', message: `This asset has ${decimals} decimals` };
   }
 
   try {
-    const wei = parseUnits(text, 18);
+    const wei = parseUnits(text, decimals);
     if (wei <= 0n) return { ok: false, error: 'AMOUNT_NOT_POSITIVE', message: 'Enter an amount greater than zero' };
     return { ok: true, wei, display: text };
   } catch {
-    return { ok: false, error: 'INVALID_AMOUNT', message: 'Enter a valid positive amount with at most 18 decimals' };
+    return { ok: false, error: 'INVALID_AMOUNT', message: `Enter a valid positive amount with at most ${decimals} decimals` };
   }
 }
 
-function withdrawalsTodayWei(entries: Awaited<ReturnType<typeof listEntries>>): bigint {
+/** Today's already-withdrawn total for ONE asset (legacy entries count as 'flux'). */
+function withdrawalsTodayWei(entries: Awaited<ReturnType<typeof listEntries>>, assetId: string): bigint {
   const today = new Date().toISOString().slice(0, 10);
   return entries
-    .filter((entry) => entry.type === 'withdraw' && entry.createdAt.slice(0, 10) === today && entry.status !== 'FAILED')
+    .filter(
+      (entry) =>
+        entry.type === 'withdraw' &&
+        (entry.asset || 'flux') === assetId &&
+        entry.createdAt.slice(0, 10) === today &&
+        entry.status !== 'FAILED'
+    )
     .reduce((total, entry) => total + BigInt(entry.amount), 0n);
 }
 
@@ -59,59 +68,64 @@ export async function validateWithdrawal({
   store,
   config,
   address,
-  amountWei
+  amountWei,
+  asset
 }: {
   store: Store;
   config: FluxConfig;
   address: string;
   amountWei: bigint;
+  /** The selected asset (its decimals drive the limit conversion). */
+  asset: AssetConfig;
 }): Promise<
   | { ok: true; available: string }
   | { ok: false; error: string; message: string; available?: string }
 > {
-  const { limits } = config;
+  const limits = assetLimits(config, asset.decimals);
   if (amountWei < limits.withdrawMinWei) {
     return {
       ok: false,
       error: 'BELOW_MINIMUM',
-      message: `Minimum withdrawal is ${(limits.withdrawMinWei / 10n ** 18n).toString()} FLUX`
+      message: `Minimum withdrawal is ${weiToTokens(limits.withdrawMinWei, asset.decimals)} ${asset.symbol}`
     };
   }
   if (amountWei > limits.withdrawMaxWei) {
     return {
       ok: false,
       error: 'ABOVE_MAXIMUM',
-      message: `Maximum withdrawal is ${(limits.withdrawMaxWei / 10n ** 18n).toString()} FLUX per request`
+      message: `Maximum withdrawal is ${weiToTokens(limits.withdrawMaxWei, asset.decimals)} ${asset.symbol} per request`
     };
   }
 
   const account = await getAccount(store, address);
-  const available = BigInt(account.available);
+  const slot = getAssetAccount(account, asset.id);
+  const available = BigInt(slot.available);
   if (amountWei > available) {
     return {
       ok: false,
       error: 'INSUFFICIENT_SITE_BALANCE',
       message: 'You cannot withdraw more than your earned site balance',
-      available: (available / 10n ** 18n).toString()
+      available: weiToTokens(available, asset.decimals)
     };
   }
 
-  const usedToday = withdrawalsTodayWei(await listEntries(store, address, 100));
+  const usedToday = withdrawalsTodayWei(await listEntries(store, address, 100), asset.id);
   if (usedToday + amountWei > limits.withdrawDailyCapWei) {
     return {
       ok: false,
       error: 'DAILY_CAP_EXCEEDED',
       message: 'Daily withdrawal cap reached — try again tomorrow',
-      available: (usedToday / 10n ** 18n).toString()
+      available: weiToTokens(usedToday, asset.decimals)
     };
   }
 
-  return { ok: true, available: (available / 10n ** 18n).toString() };
+  return { ok: true, available: weiToTokens(available, asset.decimals) };
 }
 
 export type UserOpRecord = {
   reservationId: string;
   address: string;
+  asset?: string | null;
   amount: string;
   status: 'PENDING' | 'SUCCESS' | 'REVERTED';
   txHash: string | null;
@@ -126,36 +140,61 @@ export type WithdrawalResult =
   | { ok: false; error: string; message: string; status: number; available?: string };
 
 /**
- * Validates, reserves, settles and books a withdrawal.
+ * Validates, reserves, settles and books a withdrawal of ONE asset.
  * `payload` is what the browser receives and forwards to the terminal UI.
+ *
+ * The route is resolved per asset: an asset without a contract address falls
+ * back to dry-run (when ALLOW_DRY_RUN=true) instead of failing, so the UI can
+ * say exactly which asset is not wired yet.
  */
 export async function startWithdrawal({
   store,
   config,
   address,
-  amountWei
+  amountWei,
+  asset
 }: {
   store: Store;
   config: FluxConfig;
   address: string;
   amountWei: bigint;
+  /** The selected Flash asset (address/symbol/decimals). */
+  asset: AssetConfig;
 }): Promise<WithdrawalResult> {
-  const mode = resolveGaslessMode(config);
+  // --- per-asset gasless route resolution ----------------------------------
+  const requested = config.gasless.requested;
+  const hasPaymaster = Boolean(config.gasless.paymasterUrl);
+  const hasServer = Boolean(config.keys.minterPrivateKey && config.chain.rpcUrl && asset.address);
+  let mode: string;
+  if (requested === 'dry-run') mode = config.allowDryRun ? 'dry-run' : 'unavailable';
+  else if (requested === 'paymaster')
+    mode = hasPaymaster ? 'paymaster-4337' : config.allowDryRun ? 'dry-run' : 'unavailable';
+  else if (requested === 'server')
+    mode = hasServer ? 'server-sponsored' : config.allowDryRun ? 'dry-run' : 'unavailable';
+  else
+    mode = hasPaymaster
+      ? 'paymaster-4337'
+      : hasServer
+        ? 'server-sponsored'
+        : config.allowDryRun
+          ? 'dry-run'
+          : 'unavailable';
+
   if (mode === 'unavailable') {
     return {
       ok: false,
       error: 'WITHDRAWALS_DISABLED',
-      message: 'No gasless route is configured on this Worker (set PAYMASTER_URL or MINTER_PRIVATE_KEY + TOKEN_ADDRESS)',
+      message: `No gasless route is configured for ${asset.symbol} (set PAYMASTER_URL or MINTER_PRIVATE_KEY + ${asset.envName ?? 'TOKEN_ADDRESS_' + asset.id.toUpperCase()})`,
       status: 503
     };
   }
 
-  const validation = await validateWithdrawal({ store, config, address, amountWei });
+  const validation = await validateWithdrawal({ store, config, address, amountWei, asset });
   if (!validation.ok) {
     return { ok: false, error: validation.error, message: validation.message, status: 400, available: validation.available };
   }
 
-  const reservation = await reserveWithdrawal({ store, address, amountWei });
+  const reservation = await reserveWithdrawal({ store, address, asset: asset.id, amountWei });
   if (!reservation.ok || !reservation.reservationId) {
     return {
       ok: false,
@@ -169,7 +208,10 @@ export async function startWithdrawal({
   const base = {
     ok: true,
     reservationId: reservation.reservationId,
-    amount: (amountWei / 10n ** 18n).toString(),
+    asset: asset.id,
+    symbol: asset.symbol,
+    decimals: asset.decimals,
+    amount: weiToTokens(amountWei, asset.decimals),
     amountWei: amountWei.toString(),
     mode,
     userGasCost: '0',
@@ -178,12 +220,12 @@ export async function startWithdrawal({
 
   // --- 1. sponsored ERC-4337 UserOperation --------------------------------
   if (mode === 'paymaster-4337') {
-    if (!config.chain.tokenAddress) {
+    if (!asset.address) {
       await refundWithdrawal({ store, reservationId: reservation.reservationId, reason: 'TOKEN_ADDRESS missing' });
       return {
         ok: false,
         error: 'TOKEN_ADDRESS_REQUIRED',
-        message: 'TOKEN_ADDRESS must be set for sponsored withdrawals',
+        message: `${asset.envName} must be set for sponsored ${asset.symbol} withdrawals`,
         status: 503
       };
     }
@@ -193,7 +235,7 @@ export async function startWithdrawal({
         paymasterUrl: config.gasless.paymasterUrl,
         recipientAddress: address as Address,
         amountWei,
-        tokenAddress: config.chain.tokenAddress as Address,
+        tokenAddress: asset.address as Address,
         rpcUrl: config.chain.rpcUrl,
         sponsorPrivateKey: (config.keys.minterPrivateKey || undefined) as Hex | undefined,
         chainId: config.chain.chainId
@@ -202,6 +244,7 @@ export async function startWithdrawal({
       const record: UserOpRecord = {
         reservationId: reservation.reservationId,
         address,
+        asset: asset.id,
         amount: amountWei.toString(),
         status: 'PENDING',
         txHash: result.userOpHash || null,
@@ -239,7 +282,13 @@ export async function startWithdrawal({
   // --- 2. server-sponsored mint/transfer (project pays the gas) -------------
   if (mode === 'server-sponsored') {
     try {
-      const result = await settleServerSponsored({ config, recipient: address, amountWei });
+      const result = await settleServerSponsored({
+        config,
+        recipient: address,
+        amountWei,
+        tokenAddress: asset.address,
+        symbol: asset.symbol
+      });
       const settled = await settleWithdrawal({
         store,
         reservationId: reservation.reservationId,
@@ -256,10 +305,10 @@ export async function startWithdrawal({
           txHash: result.txHash,
           explorerUrl: explorerTxUrl(config, result.txHash),
           gasPaidBy: result.payer,
-          balance: settled ? serializeAccount(settled.account) : null,
+          balance: settled ? serializeAccount(settled.account, asset.id, asset.decimals) : null,
           steps: [
             'backend validated your earned balance',
-            `project wallet ${result.method === 'mint' ? 'minted' : 'transferred'} the FLUX`,
+            `project wallet ${result.method === 'mint' ? 'minted' : 'transferred'} the ${asset.symbol}`,
             'the project paid the gas — your cost is 0'
           ]
         }
@@ -294,11 +343,11 @@ export async function startWithdrawal({
       txHash: null,
       explorerUrl: null,
       gasPaidBy: 'dry-run (ALLOW_DRY_RUN=true)',
-      balance: settled ? serializeAccount(settled.account) : null,
+      balance: settled ? serializeAccount(settled.account, asset.id, asset.decimals) : null,
       steps: [
         'backend validated your earned balance',
         'withdrawal booked as SIMULATED (no transaction was broadcast)',
-        'set MINTER_PRIVATE_KEY or PAYMASTER_URL to settle real FLUX'
+        `set MINTER_PRIVATE_KEY + ${asset.envName} to settle real ${asset.symbol}`
       ]
     }
   };

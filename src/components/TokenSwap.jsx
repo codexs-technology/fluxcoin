@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { ethers } from 'ethers';
 import { useWallet } from '../hooks/useWallet';
 import { useToken } from '../hooks/useToken';
+import { useAppStore } from '../store/useAppStore';
 import {
   approveRouter,
   getWrappedNative,
@@ -11,20 +12,28 @@ import {
 } from '../wallet/dex.js';
 import { getPairAddress, getReadProvider } from '../wallet/token.js';
 import { explorerTxUrl, explorerAddressUrl } from '../wallet/chains.js';
-import { ROUTER_ADDRESS, TOKEN_ADDRESS, TOKEN_SYMBOL } from '../contracts/addresses.js';
+import { ROUTER_ADDRESS } from '../contracts/addresses.js';
+import { getFlashAsset } from '../contracts/assets.js';
 
 /**
- * DEX swap (Uniswap V2 / PancakeSwap V2 / QuickSwap compatible).
- *
- * Everything is quoted by the router for real: the old implementation returned
- * `amountIn * 0.995` as a "simulated quote" whenever the pair did not exist, which
- * quietly invented a price. Here a missing pool is reported as exactly that.
+ * DEX swap (Uniswap V2 / PancakeSwap V2 / QuickSwap compatible) for the
+ * SELECTED Flash asset. Everything is quoted by the router for real: the old
+ * implementation returned `amountIn * 0.995` as a "simulated quote" whenever
+ * the pair did not exist, which quietly invented a price. Here a missing pool is
+ * reported as exactly that.
  */
 export default function TokenSwap() {
   const { isConnected, isEvm, chainId, activeChain } = useWallet();
-  const { balance, refreshBalance } = useToken(TOKEN_ADDRESS);
+  const selectedToken = useAppStore((s) => s.selectedToken);
+  const asset = getFlashAsset(selectedToken?.id);
+  const { balance, refreshBalance } = useToken(asset.address, asset.decimals, asset.symbol);
 
-  const [direction, setDirection] = useState('buy'); // buy = native -> FLUX, sell = FLUX -> native
+  // Shorthand wiring for the selected asset (address/decimals/symbol).
+  const tokenAddress = asset.address;
+  const tokenDecimals = asset.decimals;
+  const tokenSymbol = asset.symbol;
+
+  const [direction, setDirection] = useState('buy'); // buy = native -> asset, sell = asset -> native
   const [amountIn, setAmountIn] = useState('');
   const [amountOut, setAmountOut] = useState(null);
   const [slippage, setSlippage] = useState('1');
@@ -36,8 +45,8 @@ export default function TokenSwap() {
   const [formError, setFormError] = useState(null);
 
   const nativeSymbol = activeChain?.currency || 'ETH';
-  const inSymbol = direction === 'buy' ? nativeSymbol : TOKEN_SYMBOL;
-  const outSymbol = direction === 'buy' ? TOKEN_SYMBOL : nativeSymbol;
+  const inSymbol = direction === 'buy' ? nativeSymbol : tokenSymbol;
+  const outSymbol = direction === 'buy' ? tokenSymbol : nativeSymbol;
 
   // Resolve the router's wrapped-native address (needed for the swap path).
   useEffect(() => {
@@ -52,7 +61,7 @@ export default function TokenSwap() {
   // Show the real LP pair when it exists (null = no pool yet, see README).
   useEffect(() => {
     let active = true;
-    if (!ROUTER_ADDRESS || !wrappedNative || !TOKEN_ADDRESS) return () => { active = false; };
+    if (!ROUTER_ADDRESS || !wrappedNative || !tokenAddress) return () => { active = false; };
     (async () => {
       try {
         const router = new ethers.Contract(
@@ -61,31 +70,34 @@ export default function TokenSwap() {
           getReadProvider()
         );
         const factoryAddress = await router.factory();
-        const pair = await getPairAddress(factoryAddress, TOKEN_ADDRESS, wrappedNative);
+        const pair = await getPairAddress(factoryAddress, tokenAddress, wrappedNative);
         if (active) setPairAddress(pair);
       } catch {
         if (active) setPairAddress(null);
       }
     })();
     return () => { active = false; };
-  }, [wrappedNative]);
+  }, [wrappedNative, tokenAddress]);
 
   const refreshQuote = useCallback(async () => {
     setQuoteError(null);
     setAmountOut(null);
-    if (!amountIn || Number(amountIn) <= 0 || !ROUTER_ADDRESS || !wrappedNative || !TOKEN_ADDRESS) return;
+    if (!amountIn || Number(amountIn) <= 0 || !ROUTER_ADDRESS || !wrappedNative || !tokenAddress) return;
     try {
       const result = await quote({
         routerAddress: ROUTER_ADDRESS,
-        tokenIn: direction === 'buy' ? wrappedNative : TOKEN_ADDRESS,
-        tokenOut: direction === 'buy' ? TOKEN_ADDRESS : wrappedNative,
-        amountIn
+        tokenIn: direction === 'buy' ? wrappedNative : tokenAddress,
+        tokenOut: direction === 'buy' ? tokenAddress : wrappedNative,
+        amountIn,
+        // The quote must respect the per-asset precision (USDT 6d, BTC 8d, …).
+        decimalsIn: direction === 'buy' ? 18 : tokenDecimals,
+        decimalsOut: direction === 'buy' ? tokenDecimals : 18
       });
       setAmountOut(result);
     } catch {
-      setQuoteError('No FLUX/native liquidity pool found for this amount on this network. Add liquidity first (see README → "Add liquidity").');
+      setQuoteError(`No ${tokenSymbol}/native liquidity pool found for this amount on this network. Add liquidity first (see README → "Add liquidity").`);
     }
-  }, [amountIn, direction, wrappedNative]);
+  }, [amountIn, direction, wrappedNative, tokenAddress, tokenDecimals, tokenSymbol]);
 
   useEffect(() => {
     const timer = setTimeout(refreshQuote, 350);
@@ -116,18 +128,20 @@ export default function TokenSwap() {
       if (direction === 'buy') {
         tx = await swapExactNativeForTokens({
           routerAddress: ROUTER_ADDRESS,
-          tokenOut: TOKEN_ADDRESS,
+          tokenOut: tokenAddress,
           nativeAmount: amountIn,
           slippageBps
         });
       } else {
-        // Selling FLUX requires a real approval for the router first.
-        await approveRouter({ routerAddress: ROUTER_ADDRESS, tokenAddress: TOKEN_ADDRESS, amount: amountIn });
+        // Selling the asset requires a real approval for the router first
+        // (exact amount, per-asset decimals — never a blanket MaxUint256).
+        await approveRouter({ routerAddress: ROUTER_ADDRESS, tokenAddress, amount: amountIn, decimals: tokenDecimals });
         tx = await swapExactTokensForNative({
           routerAddress: ROUTER_ADDRESS,
-          tokenIn: TOKEN_ADDRESS,
+          tokenIn: tokenAddress,
           amountIn,
-          slippageBps
+          slippageBps,
+          decimalsIn: tokenDecimals
         });
       }
       setTxHash(tx.hash);
@@ -159,7 +173,7 @@ export default function TokenSwap() {
             direction === 'buy' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40' : 'text-slate-400'
           }`}
         >
-          BUY {TOKEN_SYMBOL} ({nativeSymbol})
+          BUY {tokenSymbol} ({nativeSymbol})
         </button>
         <button
           onClick={() => setDirection('sell')}
@@ -167,7 +181,7 @@ export default function TokenSwap() {
             direction === 'sell' ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40' : 'text-slate-400'
           }`}
         >
-          SELL {TOKEN_SYMBOL} → {nativeSymbol}
+          SELL {tokenSymbol} → {nativeSymbol}
         </button>
       </div>
 
@@ -238,7 +252,7 @@ export default function TokenSwap() {
               {pairAddress} ↗
             </a>
           ) : (
-            'not created yet — add liquidity (README → "Add liquidity / make FLUX tradable")'
+            'not created yet — add liquidity (README → "Add liquidity / make the token tradable")'
           )}
         </div>
         <div>Swaps are normal signed transactions (you pay the network gas). Only withdrawals are gasless.</div>

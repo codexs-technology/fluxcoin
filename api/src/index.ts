@@ -28,17 +28,25 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { getAddress, isAddress, type Address } from 'viem';
 import {
+  assetLimits,
   buildConfig,
   configWarnings,
-  DECIMALS,
   resolveGaslessMode,
   weiToTokens,
   type FluxConfig
 } from './config.js';
 import {
+  ASSET_IDS,
+  assetSummary,
+  decimalsForAsset,
+  resolveAssetId,
+  type AssetConfig
+} from './assets.js';
+import {
   createStore,
   creditEarn,
   getAccount,
+  getAssetAccount,
   listEntries,
   rateLimit,
   serializeAccount,
@@ -54,6 +62,12 @@ type Bindings = {
   RPC_URL?: string;
   TOKEN_ADDRESS?: string;
   FAUCET_ADDRESS?: string;
+  /** Per-asset FlashToken contracts (Flash USDT/BTC/ETH/TRX/SOL). */
+  TOKEN_ADDRESS_USDT?: string;
+  TOKEN_ADDRESS_BTC?: string;
+  TOKEN_ADDRESS_ETH?: string;
+  TOKEN_ADDRESS_TRX?: string;
+  TOKEN_ADDRESS_SOL?: string;
   EXPLORER_URL?: string;
   SESSION_SECRET?: string;
   CORS_ORIGINS?: string;
@@ -244,10 +258,16 @@ app.get('/api/health', async (c) => {
     network: {
       chainId: config.chain.chainId,
       explorer: config.chain.explorerUrl,
-      tokenConfigured: Boolean(config.chain.tokenAddress)
+      tokenConfigured: Boolean(config.chain.tokenAddress),
+      assets: assetSummary(config.assets),
+      assetsConfigured: assetSummary(config.assets).filter((asset) => asset.configured).length
     },
     storage: store.kind,
-    gasless: resolveGaslessMode(config),
+    gasless: {
+      mode: resolveGaslessMode(config),
+      /** The user never pays gas in any route — advertised for the flow test + UI. */
+      userGasCost: '0'
+    },
     warnings: configWarnings(config)
   });
 });
@@ -359,25 +379,38 @@ app.get('/api/auth/session', async (c) => {
 
 // --- balances ----------------------------------------------------------------
 
-async function balancePayload(c: ApiContext, config: FluxConfig, store: Store, address: string) {
+async function balancePayload(
+  c: ApiContext,
+  config: FluxConfig,
+  store: Store,
+  address: string,
+  assetId: string
+) {
+  // The selected asset drives everything: its contract address, its decimals.
+  const asset: AssetConfig = config.assets[assetId as keyof typeof config.assets] || config.assets.usdt;
   const account = await getAccount(store, address);
-  const onchain = await getOnChainTokenBalance(config, address);
+  const onchain = await getOnChainTokenBalance(config, address, asset.address || undefined, asset.decimals);
 
   return {
     ok: true,
-    site: serializeAccount(account),
+    asset: asset.id,
+    symbol: asset.symbol,
+    decimals: asset.decimals,
+    site: serializeAccount(account, asset.id, asset.decimals),
     onchain: {
       balanceTokens: onchain,
-      symbol: 'FLUX',
-      decimals: DECIMALS,
-      tokenAddress: config.chain.tokenAddress || null
+      symbol: asset.symbol,
+      decimals: asset.decimals,
+      tokenAddress: asset.address || null
     },
+    /** Site balance of every asset, so the UI can switch presets without a reload. */
+    assets: ASSET_IDS.map((id) => serializeAccount(account, id, config.assets[id].decimals)),
     chain: {
       chainId: config.chain.chainId,
       gaslessMode: resolveGaslessMode(config),
-      withdrawMinTokens: weiToTokens(config.limits.withdrawMinWei),
-      withdrawMaxTokens: weiToTokens(config.limits.withdrawMaxWei),
-      withdrawDailyCapTokens: weiToTokens(config.limits.withdrawDailyCapWei)
+      withdrawMinTokens: config.limits.withdrawMinTokens,
+      withdrawMaxTokens: config.limits.withdrawMaxTokens,
+      withdrawDailyCapTokens: config.limits.withdrawDailyCapTokens
     }
   };
 }
@@ -391,7 +424,8 @@ app.get('/api/balance', async (c) => {
   const limited = await throttle(c, store, 'balance', auth.address, 120);
   if (limited) return limited;
 
-  return c.json(await balancePayload(c, config, store, auth.address));
+  const assetId = resolveAssetId(c.req.query('asset')) || 'usdt';
+  return c.json(await balancePayload(c, config, store, auth.address, assetId));
 });
 
 /** Explicit address — must match the signed session, never a free-for-all. */
@@ -407,16 +441,19 @@ app.get('/api/balance/:address', async (c) => {
     return fail(c, 403, 'ADDRESS_MISMATCH', 'You can only read the balance of the wallet that signed the session');
   }
 
-  return c.json(await balancePayload(c, config, store, auth.address));
+  const assetId = resolveAssetId(c.req.query('asset')) || 'usdt';
+  return c.json(await balancePayload(c, config, store, auth.address, assetId));
 });
 
 // --- forge / earn ------------------------------------------------------------
 
 /**
- * Credits the earned (off-chain) balance. Server-side limits only: the browser
- * can ask for anything, the Worker decides what is allowed.
+ * Credits the earned (off-chain) balance of ONE asset. Server-side limits only:
+ * the browser can ask for anything, the Worker decides what is allowed.
  *
- * Body: `{ address?, asset?, quantity | amount, source? }`
+ * Body: `{ address?, asset, quantity | amount, source? }`
+ * `asset` is the selected preset id/ticker (usdt/btc/eth/trx/sol, default usdt)
+ * and decides WHICH Flash contract a later withdrawal mints from.
  */
 async function handleForge(c: ApiContext) {
   const config = configOf(c);
@@ -435,47 +472,75 @@ async function handleForge(c: ApiContext) {
   const limited = await throttle(c, store, 'forge', auth.address, 30);
   if (limited) return limited;
 
-  const parsed = parseAmount(body?.quantity ?? body?.amount);
+  const assetId = resolveAssetId(body?.asset);
+  if (!assetId) {
+    return fail(
+      c,
+      400,
+      'UNKNOWN_ASSET',
+      `Unknown asset "${String(body?.asset)}" — valid assets: ${ASSET_IDS.join(', ')}`
+    );
+  }
+  const asset = config.assets[assetId];
+
+  const parsed = parseAmount(body?.quantity ?? body?.amount, asset.decimals);
   if (!parsed.ok) return fail(c, 400, parsed.error, parsed.message);
 
-  const { limits } = config;
+  const limits = assetLimits(config, asset.decimals);
   if (parsed.wei < limits.earnMinWei) {
-    return fail(c, 400, 'BELOW_MINIMUM', `Minimum claim is ${weiToTokens(limits.earnMinWei)} FLUX`);
+    return fail(c, 400, 'BELOW_MINIMUM', `Minimum claim is ${weiToTokens(limits.earnMinWei, asset.decimals)} ${asset.symbol}`);
   }
   if (parsed.wei > limits.earnMaxWei) {
-    return fail(c, 400, 'ABOVE_MAXIMUM', `Maximum claim is ${weiToTokens(limits.earnMaxWei)} FLUX per request`);
+    return fail(
+      c,
+      400,
+      'ABOVE_MAXIMUM',
+      `Maximum claim is ${weiToTokens(limits.earnMaxWei, asset.decimals)} ${asset.symbol} per request`
+    );
   }
 
   const account = await getAccount(store, auth.address);
-  const sinceLast = Date.now() - (account.lastEarnAt || 0);
-  if (account.lastEarnAt && sinceLast < limits.earnCooldownMs) {
+  const slot = getAssetAccount(account, assetId);
+  const sinceLast = Date.now() - (slot.lastEarnAt || 0);
+  if (slot.lastEarnAt && sinceLast < limits.earnCooldownMs) {
     return fail(c, 429, 'COOLDOWN_ACTIVE', `Wait ${Math.ceil((limits.earnCooldownMs - sinceLast) / 1000)}s before the next claim`, {
       retryAfterMs: limits.earnCooldownMs - sinceLast
     });
   }
-  if (BigInt(account.earnedToday) + parsed.wei > limits.earnDailyCapWei) {
-    return fail(c, 429, 'DAILY_CAP_EXCEEDED', `Daily earning cap is ${weiToTokens(limits.earnDailyCapWei)} FLUX`);
+  if (BigInt(slot.earnedToday) + parsed.wei > limits.earnDailyCapWei) {
+    return fail(
+      c,
+      429,
+      'DAILY_CAP_EXCEEDED',
+      `Daily earning cap is ${weiToTokens(limits.earnDailyCapWei, asset.decimals)} ${asset.symbol}`
+    );
   }
 
   const { account: updated, entry } = await creditEarn({
     store,
     address: auth.address,
+    asset: assetId,
     amountWei: parsed.wei,
-    source: String(body?.asset || body?.source || 'forge').slice(0, 32)
+    source: String(body?.source || 'forge').slice(0, 32)
   });
 
+  const site = serializeAccount(updated, assetId, asset.decimals);
   return c.json({
     ok: true,
+    asset: assetId,
+    symbol: asset.symbol,
+    decimals: asset.decimals,
     entry: {
       id: entry.id,
-      amountTokens: weiToTokens(parsed.wei),
+      asset: assetId,
+      amountTokens: weiToTokens(parsed.wei, asset.decimals),
       status: entry.status,
       createdAt: entry.createdAt
     },
     site: {
-      availableTokens: weiToTokens(updated.available),
-      earnedTokens: weiToTokens(updated.earned),
-      earnedTodayTokens: weiToTokens(updated.earnedToday)
+      availableTokens: site.availableTokens,
+      earnedTokens: site.earnedTokens,
+      earnedTodayTokens: site.earnedTodayTokens
     }
   });
 }
@@ -495,8 +560,9 @@ app.get('/api/earn/history', async (c) => {
   const entries = (await listEntries(store, auth.address, 100)).map((entry) => ({
     id: entry.id,
     type: entry.type,
+    asset: entry.asset || 'flux',
     status: entry.status,
-    amountTokens: weiToTokens(entry.amount),
+    amountTokens: weiToTokens(entry.amount, decimalsForAsset(entry.asset)),
     txHash: entry.txHash || null,
     method: entry.method || null,
     createdAt: entry.createdAt
@@ -507,7 +573,7 @@ app.get('/api/earn/history', async (c) => {
 
 // --- withdrawals -------------------------------------------------------------
 
-/** Public config for the withdrawal UI: mode, limits, token, and the 0-gas promise. */
+/** Public config for the withdrawal UI: mode, limits, per-asset tokens, and the 0-gas promise. */
 app.get('/api/withdraw/config', (c) => {
   const config = configOf(c);
   const mode = resolveGaslessMode(config);
@@ -517,15 +583,18 @@ app.get('/api/withdraw/config', (c) => {
     mode,
     available: mode !== 'unavailable',
     chainId: config.chain.chainId,
+    defaultAsset: 'usdt',
+    assets: assetSummary(config.assets),
+    // Legacy single-token wiring (kept for old builds; the UI should use `assets`).
     token: {
       address: config.chain.tokenAddress || null,
       symbol: 'FLUX',
-      decimals: DECIMALS
+      decimals: 18
     },
     faucet: config.chain.faucetAddress || null,
-    minTokens: weiToTokens(config.limits.withdrawMinWei),
-    maxTokens: weiToTokens(config.limits.withdrawMaxWei),
-    dailyCapTokens: weiToTokens(config.limits.withdrawDailyCapWei),
+    minTokens: config.limits.withdrawMinTokens,
+    maxTokens: config.limits.withdrawMaxTokens,
+    dailyCapTokens: config.limits.withdrawDailyCapTokens,
     userGasCost: '0',
     paymaster: config.gasless.paymasterUrl
       ? { configured: true, url: config.gasless.paymasterUrl }
@@ -543,16 +612,28 @@ app.post('/api/withdraw', async (c) => {
 
   const requested = body?.address ? String(body.address) : '';
   if (requested && requested.toLowerCase() !== auth.address.toLowerCase()) {
-    return fail(c, 403, 'ADDRESS_MISMATCH', 'FLUX can only be withdrawn to the wallet that signed the session');
+    return fail(c, 403, 'ADDRESS_MISMATCH', 'Tokens can only be withdrawn to the wallet that signed the session');
   }
 
   const limited = await throttle(c, store, 'withdraw', auth.address, 10);
   if (limited) return limited;
 
-  const parsed = parseAmount(body?.amount ?? body?.quantity);
+  // Which asset's Flash contract settles this withdrawal (default usdt).
+  const assetId = resolveAssetId(body?.asset);
+  if (!assetId) {
+    return fail(
+      c,
+      400,
+      'UNKNOWN_ASSET',
+      `Unknown asset "${String(body?.asset)}" — valid assets: ${ASSET_IDS.join(', ')}`
+    );
+  }
+  const asset = config.assets[assetId];
+
+  const parsed = parseAmount(body?.amount ?? body?.quantity, asset.decimals);
   if (!parsed.ok) return fail(c, 400, parsed.error, parsed.message);
 
-  const result = await startWithdrawal({ store, config, address: auth.address, amountWei: parsed.wei });
+  const result = await startWithdrawal({ store, config, address: auth.address, amountWei: parsed.wei, asset });
   if (!result.ok) {
     return fail(c, result.status, result.error, result.message, { available: result.available });
   }
@@ -572,8 +653,9 @@ app.get('/api/withdraw/history', async (c) => {
     .map((entry) => ({
       id: entry.id,
       type: entry.type,
+      asset: entry.asset || 'flux',
       status: entry.status,
-      amountTokens: weiToTokens(entry.amount),
+      amountTokens: weiToTokens(entry.amount, decimalsForAsset(entry.asset)),
       txHash: entry.txHash || null,
       userOpHash: entry.userOpHash || null,
       method: entry.method || null,

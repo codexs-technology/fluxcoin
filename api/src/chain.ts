@@ -75,22 +75,31 @@ function normalizeKey(rawKey: string): Hex {
   return (rawKey.startsWith('0x') ? rawKey : `0x${rawKey}`) as Hex;
 }
 
-/** Live ERC-20 balance of `address`; `null` when the chain/token is unreachable. */
-export async function getOnChainTokenBalance(config: FluxConfig, address: string): Promise<string | null> {
+/**
+ * Live ERC-20 balance of `address`; `null` when the chain/token is unreachable.
+ * `tokenAddress`/`decimals` default to the legacy FLUX wiring — the per-asset
+ * routes pass the selected asset's contract + precision explicitly.
+ */
+export async function getOnChainTokenBalance(
+  config: FluxConfig,
+  address: string,
+  tokenAddress: string = config.chain.tokenAddress,
+  decimals: number = 18
+): Promise<string | null> {
   const client = getPublicClient(config);
-  if (!client || !config.chain.tokenAddress) return null;
+  if (!client || !tokenAddress) return null;
 
   const { formatUnits } = await import('viem');
   try {
     const raw = (await client.readContract({
-      address: config.chain.tokenAddress as Address,
+      address: tokenAddress as Address,
       abi: FLUXCOIN_ABI,
       functionName: 'balanceOf',
       args: [address as Address]
     })) as bigint;
-    return formatUnits(raw, 18);
+    return formatUnits(raw, decimals);
   } catch (error) {
-    console.warn('[chain] balanceOf failed:', (error as Error).message);
+    console.warn(`[chain] balanceOf failed for ${tokenAddress}:`, (error as Error).message);
     return null;
   }
 }
@@ -141,25 +150,30 @@ export async function getChainStatus(config: FluxConfig) {
 export type ServerSponsoredResult = { txHash: string; payer: string; method: 'mint' | 'transfer' };
 
 /**
- * Settles a withdrawal with the project wallet: it mints to the user when the
- * key holds `MINTER_ROLE`, otherwise it transfers the project's own balance.
- * Either way the gas is paid by the project, so the user pays 0.
+ * Settles a withdrawal with the project wallet on ONE asset's contract: it mints
+ * to the user when the key holds `MINTER_ROLE`, otherwise it transfers the
+ * project's own balance. Either way the gas is paid by the project, so the user
+ * pays 0. `tokenAddress` is the per-asset FlashToken contract.
  */
 export async function settleServerSponsored({
   config,
   recipient,
-  amountWei
+  amountWei,
+  tokenAddress,
+  symbol = 'token'
 }: {
   config: FluxConfig;
   recipient: string;
   amountWei: bigint;
+  tokenAddress: string;
+  symbol?: string;
 }): Promise<ServerSponsoredResult> {
-  if (!config.chain.tokenAddress) throw new Error('TOKEN_ADDRESS is not set (wrangler.jsonc -> vars)');
+  if (!tokenAddress) throw new Error(`${symbol} contract address is not set (TOKEN_ADDRESS_* in wrangler.jsonc)`);
   if (!config.chain.rpcUrl) throw new Error('RPC_URL is not set (wrangler.jsonc -> vars)');
   if (!config.keys.minterPrivateKey) throw new Error('MINTER_PRIVATE_KEY is not set (wrangler secret)');
 
   const account = privateKeyToAccount(normalizeKey(config.keys.minterPrivateKey));
-  const token = config.chain.tokenAddress as Address;
+  const token = tokenAddress as Address;
   const client = createWalletClient({
     account,
     chain: resolveChain(config),
@@ -175,10 +189,11 @@ export async function settleServerSponsored({
       args: [recipient as Address, amountWei]
     });
     const receipt = await publicClient?.waitForTransactionReceipt({ hash });
+    console.log(`[chain] ${symbol} minted to ${recipient}: ${receipt?.transactionHash || hash}`);
     return { txHash: receipt?.transactionHash || hash, payer: account.address, method: 'mint' };
   } catch (mintError) {
     const message = (mintError as Error).message || 'mint failed';
-    console.warn('[chain] mint reverted, falling back to transfer:', message);
+    console.warn(`[chain] ${symbol} mint reverted, falling back to transfer:`, message);
   }
 
   const hash = await client.writeContract({

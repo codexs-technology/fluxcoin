@@ -8,7 +8,8 @@
  *
  * Storage is Cloudflare KV when `FLUXCOIN_KV` is bound, and an in-isolate Map
  * otherwise, so the Worker boots (and answers /api/health) before the namespace
- * exists. Amounts are always 18-decimal **wei strings** — never floats.
+ * exists. Amounts are always base-unit **wei strings** (per-asset decimals:
+ * 1e6 for USDT, 1e8 for BTC, …) — never floats.
  */
 import { weiToTokens } from './config.js';
 
@@ -76,8 +77,11 @@ export function createStore(env: Record<string, unknown>): Store {
 
 // --- accounts ----------------------------------------------------------------
 
-export type Account = {
-  address: string;
+/**
+ * Balance slot for ONE asset (usdt/btc/eth/trx/sol). All amounts are base
+ * units of that asset's contract (USDT 1e6, BTC 1e8, ETH 1e18, TRX 1e6, SOL 1e9).
+ */
+export type AssetAccount = {
   earned: string;
   withdrawn: string;
   available: string;
@@ -88,11 +92,24 @@ export type Account = {
   lastWithdrawAt: number;
 };
 
+/**
+ * One address, one slot per asset — the user earns/withdraws each Flash token
+ * independently. Legacy note: accounts written by the single-token build stored
+ * flat fields; `normalizeAccount` migrates them under the "flux" key so no
+ * earned balance is lost after the upgrade.
+ */
+export type Account = {
+  address: string;
+  assets: Record<string, AssetAccount>;
+};
+
 export type LedgerEntry = {
   id: string;
   type: 'earn' | 'withdraw';
   address: string;
   amount: string;
+  /** Asset id (usdt/btc/eth/trx/sol); legacy entries have none -> 'flux'. */
+  asset?: string | null;
   status: string;
   source?: string;
   method?: string | null;
@@ -113,9 +130,8 @@ function todayKey(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-function emptyAccount(address: string): Account {
+function emptyAssetAccount(): AssetAccount {
   return {
-    address,
     earned: '0',
     withdrawn: '0',
     available: '0',
@@ -127,16 +143,68 @@ function emptyAccount(address: string): Account {
   };
 }
 
-/** Reads an account, rolling the daily earn counter over lazily. */
+/**
+ * Accepts either the new per-asset shape ({ assets: {...} }) or a legacy flat
+ * single-token account and always returns the per-asset shape. The legacy flat
+ * fields are preserved under the "flux" key so old balances survive the upgrade.
+ */
+function normalizeAccount(address: string, raw: unknown): Account {
+  if (!raw || typeof raw !== 'object') return { address, assets: {} };
+  const record = raw as Record<string, unknown>;
+
+  if (record.assets && typeof record.assets === 'object') {
+    return { address, assets: record.assets as Record<string, AssetAccount> };
+  }
+
+  if (typeof record.available === 'string') {
+    const legacy = emptyAssetAccount();
+    for (const field of ['earned', 'withdrawn', 'available', 'reserved', 'earnedToday'] as const) {
+      if (typeof record[field] === 'string') legacy[field] = record[field] as string;
+    }
+    if (typeof record.earnDay === 'string') legacy.earnDay = record.earnDay;
+    if (typeof record.lastEarnAt === 'number') legacy.lastEarnAt = record.lastEarnAt;
+    if (typeof record.lastWithdrawAt === 'number') legacy.lastWithdrawAt = record.lastWithdrawAt;
+    return { address, assets: { flux: legacy } };
+  }
+
+  return { address, assets: {} };
+}
+
+/** Reads an account, rolling every asset's daily earn counter over lazily. */
 export async function getAccount(store: Store, address: string): Promise<Account> {
   const raw = await store.get(accountKey(address));
-  const account: Account = raw ? { ...emptyAccount(address), ...JSON.parse(raw) } : emptyAccount(address);
-  if (account.earnDay !== todayKey()) {
-    account.earnDay = todayKey();
-    account.earnedToday = '0';
-    await saveAccount(store, account);
+  const account = normalizeAccount(address, raw ? JSON.parse(raw) : null);
+
+  let dirty = false;
+  for (const assetId of Object.keys(account.assets)) {
+    const slot = account.assets[assetId];
+    if (slot.earnDay !== todayKey()) {
+      slot.earnDay = todayKey();
+      slot.earnedToday = '0';
+      dirty = true;
+    }
   }
+  if (dirty) await saveAccount(store, account);
   return account;
+}
+
+/**
+ * Returns the balance slot for one asset, creating it on first use and rolling
+ * its daily counter. Mutates `account` in place — callers persist with
+ * `saveAccount` inside their mutation flow.
+ */
+export function getAssetAccount(account: Account, asset: string): AssetAccount {
+  let slot = account.assets[asset];
+  if (!slot) {
+    slot = emptyAssetAccount();
+    account.assets[asset] = slot;
+    return slot;
+  }
+  if (slot.earnDay !== todayKey()) {
+    slot.earnDay = todayKey();
+    slot.earnedToday = '0';
+  }
+  return slot;
 }
 
 export async function saveAccount(store: Store, account: Account): Promise<void> {
@@ -162,16 +230,19 @@ export async function getEntry(store: Store, id: string): Promise<LedgerEntry | 
   return raw ? (JSON.parse(raw) as LedgerEntry) : null;
 }
 
-export function serializeAccount(account: Account) {
+/** Serialized, per-asset view of an account (amounts formatted with that asset's decimals). */
+export function serializeAccount(account: Account, asset: string, decimals: number) {
+  const slot = account.assets[asset] || emptyAssetAccount();
   return {
     address: account.address,
-    availableTokens: weiToTokens(account.available),
-    reservedTokens: weiToTokens(account.reserved),
-    earnedTokens: weiToTokens(account.earned),
-    withdrawnTokens: weiToTokens(account.withdrawn),
-    earnedTodayTokens: weiToTokens(account.earnedToday),
-    lastEarnAt: account.lastEarnAt || null,
-    lastWithdrawAt: account.lastWithdrawAt || null
+    asset,
+    availableTokens: weiToTokens(slot.available, decimals),
+    reservedTokens: weiToTokens(slot.reserved, decimals),
+    earnedTokens: weiToTokens(slot.earned, decimals),
+    withdrawnTokens: weiToTokens(slot.withdrawn, decimals),
+    earnedTodayTokens: weiToTokens(slot.earnedToday, decimals),
+    lastEarnAt: slot.lastEarnAt || null,
+    lastWithdrawAt: slot.lastWithdrawAt || null
   };
 }
 
@@ -187,29 +258,34 @@ function randomId(prefix: string): string {
   return `${prefix}-${suffix}`;
 }
 
-/** Credits earned coins (the off-chain "generate" action). */
+/** Credits earned coins of ONE asset (the off-chain "generate" action). */
 export async function creditEarn({
   store,
   address,
+  asset,
   amountWei,
   source = 'forge'
 }: {
   store: Store;
   address: string;
+  /** Asset id: usdt | btc | eth | trx | sol. */
+  asset: string;
   amountWei: bigint;
   source?: string;
 }): Promise<{ account: Account; entry: LedgerEntry }> {
   const account = await getAccount(store, address);
+  const slot = getAssetAccount(account, asset);
 
-  account.earned = (BigInt(account.earned) + amountWei).toString();
-  account.available = (BigInt(account.available) + amountWei).toString();
-  account.earnedToday = (BigInt(account.earnedToday) + amountWei).toString();
-  account.lastEarnAt = Date.now();
+  slot.earned = (BigInt(slot.earned) + amountWei).toString();
+  slot.available = (BigInt(slot.available) + amountWei).toString();
+  slot.earnedToday = (BigInt(slot.earnedToday) + amountWei).toString();
+  slot.lastEarnAt = Date.now();
 
   const entry: LedgerEntry = {
     id: randomId('ERN'),
     type: 'earn',
     address,
+    asset,
     amount: amountWei.toString(),
     source,
     status: 'CREDITED',
@@ -231,10 +307,13 @@ export async function creditEarn({
 export async function reserveWithdrawal({
   store,
   address,
+  asset,
   amountWei
 }: {
   store: Store;
   address: string;
+  /** Asset id the withdrawal is settled in (usdt/btc/eth/trx/sol). */
+  asset: string;
   amountWei: bigint;
 }): Promise<{
   ok: boolean;
@@ -245,21 +324,23 @@ export async function reserveWithdrawal({
   entry?: LedgerEntry;
 }> {
   const account = await getAccount(store, address);
-  const available = BigInt(account.available);
+  const slot = getAssetAccount(account, asset);
+  const available = BigInt(slot.available);
 
   if (amountWei <= 0n) return { ok: false, error: 'AMOUNT_NOT_POSITIVE' };
   if (amountWei > available) {
     return { ok: false, error: 'INSUFFICIENT_SITE_BALANCE', available: available.toString() };
   }
 
-  account.available = (available - amountWei).toString();
-  account.reserved = (BigInt(account.reserved) + amountWei).toString();
+  slot.available = (available - amountWei).toString();
+  slot.reserved = (BigInt(slot.reserved) + amountWei).toString();
 
   const reservationId = randomId('WDR');
   const entry: LedgerEntry = {
     id: reservationId,
     type: 'withdraw',
     address,
+    asset,
     amount: amountWei.toString(),
     status: 'PENDING',
     method: null,
@@ -305,10 +386,12 @@ export async function settleWithdrawal({
   if (!entry) return null;
 
   const amount = BigInt(entry.amount);
+  const assetId = entry.asset || 'flux';
   const account = await getAccount(store, entry.address);
-  account.reserved = (BigInt(account.reserved) - amount).toString();
-  account.withdrawn = (BigInt(account.withdrawn) + amount).toString();
-  account.lastWithdrawAt = Date.now();
+  const slot = getAssetAccount(account, assetId);
+  slot.reserved = (BigInt(slot.reserved) - amount).toString();
+  slot.withdrawn = (BigInt(slot.withdrawn) + amount).toString();
+  slot.lastWithdrawAt = Date.now();
 
   const settled = await patchEntry(store, entry, {
     status: simulated ? 'SIMULATED' : 'CONFIRMED',
@@ -337,9 +420,11 @@ export async function refundWithdrawal({
   if (!entry) return null;
 
   const amount = BigInt(entry.amount);
+  const assetId = entry.asset || 'flux';
   const account = await getAccount(store, entry.address);
-  account.reserved = (BigInt(account.reserved) - amount).toString();
-  account.available = (BigInt(account.available) + amount).toString();
+  const slot = getAssetAccount(account, assetId);
+  slot.reserved = (BigInt(slot.reserved) - amount).toString();
+  slot.available = (BigInt(slot.available) + amount).toString();
 
   const failed = await patchEntry(store, entry, {
     status: 'FAILED',
