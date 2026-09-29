@@ -2,6 +2,8 @@
 
 Yeh guide 5 alag Flash token contracts (Flash USDT / BTC / ETH / TRX / SOL), Cloudflare Worker, aur frontend ko **Polygon mainnet (chainId 137)** pe production-ready deploy karne ke liye hai. Sepolia sirf testing ke liye hai (Step 9).
 
+> 🚀 **Beginner-friendly ordered checklist** (copy-paste ready commands): [`MAINNET-DEPLOY-CHECKLIST.md`](MAINNET-DEPLOY-CHECKLIST.md) — yeh detail guide ka step-by-step companion hai.
+
 **Architecture (per-asset contracts):**
 
 | Asset | Contract name | Symbol | Decimals | Env var (Worker) | Env var (frontend) |
