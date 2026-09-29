@@ -15,7 +15,30 @@
  *   BACKEND_MINTER_ADDRESS  Worker hot wallet address -> gets MINTER_ROLE on all 5 tokens
  *                           (must be the address of MINTER_PRIVATE_KEY set as a Worker secret)
  *
+ * Role wiring (why the deployer is the temporary admin):
+ *   FlashToken's constructor grants DEFAULT_ADMIN_ROLE + MINTER_ROLE to its `admin`
+ *   argument, and AccessControl only lets the *role admin* grant roles — so a
+ *   deployer that is not TOKEN_ADMIN_ADDRESS cannot call grantRole itself (this is
+ *   what made the first Sepolia run revert on the minter grant). Each contract is
+ *   therefore deployed with the DEPLOYER as the initial admin, the backend minter
+ *   gets MINTER_ROLE from the deployer, and when TOKEN_ADMIN_ADDRESS differs from
+ *   the deployer, both admin roles are handed over to it at the end (the deployer
+ *   then renounces). Final state per token:
+ *     DEFAULT_ADMIN_ROLE + MINTER_ROLE -> TOKEN_ADMIN_ADDRESS
+ *     MINTER_ROLE                      -> BACKEND_MINTER_ADDRESS
+ *     deployer                         -> no roles
+ *
  * Optional per-asset overrides: FLASH_INITIAL_SUPPLY_<ID>, FLASH_MAX_SUPPLY_<ID> (whole tokens).
+ *
+ * Resuming a partial deployment (e.g. the run died after some contracts):
+ *   FLASH_REUSE_<ID>_ADDRESS=0x...  reuse an already-deployed contract instead of
+ *                                   deploying it again (ID = USDT/BTC/ETH/TRX/SOL).
+ *                                   The reused contract's role wiring must be signed
+ *                                   by its admin — set ADMIN_PRIVATE_KEY in the root
+ *                                   .env to the TOKEN_ADMIN_ADDRESS wallet key (that
+ *                                   admin wallet needs a little gas for the grant).
+ *                                   ADMIN_PRIVATE_KEY is ignored for fresh deploys;
+ *                                   remove it from .env once the resume run finishes.
  *
  * Output: ../.env.flash-assets.json manifest + the exact env lines to paste into
  * the root .env (VITE_TOKEN_ADDRESS_*) and wrangler.jsonc (TOKEN_ADDRESS_*).
@@ -49,7 +72,8 @@ async function main() {
   console.log(`network        : ${hre.network.name} (chainId ${chainId})`);
   console.log(`deployer       : ${deployer.address}`);
   console.log(`admin          : ${admin}`);
-  console.log(`backend minter : ${backendMinter}\n`);
+  console.log(`backend minter : ${backendMinter}`);
+  console.log(`admin handover : ${admin !== deployer.address ? `yes — deployer wires roles first, then hands over to ${admin}` : 'no — deployer keeps the admin roles'}\n`);
 
   const deployments = {};
 
@@ -57,29 +81,83 @@ async function main() {
     const upper = asset.id.toUpperCase();
     const initialSupply = BigInt(env(`FLASH_INITIAL_SUPPLY_${upper}`, '0')); // 0 = mint on demand
     const maxSupply = BigInt(env(`FLASH_MAX_SUPPLY_${upper}`, asset.defaultMaxSupply));
+    const reuse = env(`FLASH_REUSE_${upper}_ADDRESS`, '');
 
-    console.log(`Deploying ${asset.name} (${asset.symbol}, ${asset.decimals} decimals)…`);
-    const FlashToken = await hre.ethers.getContractFactory('FlashToken');
-    const token = await FlashToken.deploy(
-      asset.name,
-      asset.symbol,
-      asset.decimals,
-      admin,
-      initialSupply,
-      maxSupply
-    );
-    await token.waitForDeployment();
-    const address = await token.getAddress();
-    console.log(`  ${asset.symbol.padEnd(5)} -> ${address}`);
+    let token;
+    let address;
+    if (reuse) {
+      console.log(`Reusing ${asset.name} (${asset.symbol}) at ${reuse} — no new deploy`);
+      address = reuse;
+      token = await hre.ethers.getContractAt('FlashToken', address);
+    } else {
+      console.log(`Deploying ${asset.name} (${asset.symbol}, ${asset.decimals} decimals)…`);
+      const FlashToken = await hre.ethers.getContractFactory('FlashToken');
+      // The DEPLOYER is passed as the initial admin so it can grant MINTER_ROLE right
+      // after the constructor (AccessControl only lets the role admin grant roles).
+      // When TOKEN_ADMIN_ADDRESS differs, its roles are handed over below.
+      token = await FlashToken.deploy(
+        asset.name,
+        asset.symbol,
+        asset.decimals,
+        deployer.address,
+        initialSupply,
+        maxSupply
+      );
+      await token.waitForDeployment();
+      address = await token.getAddress();
+      console.log(`  ${asset.symbol.padEnd(5)} -> ${address}`);
+    }
+
+    const MINTER_ROLE = await token.MINTER_ROLE();
+    const DEFAULT_ADMIN_ROLE = await token.DEFAULT_ADMIN_ROLE();
+
+    // Role grants must be signed by the contract's DEFAULT_ADMIN_ROLE holder:
+    // fresh deploys -> the deployer (constructor admin); reused contracts ->
+    // ADMIN_PRIVATE_KEY (the current admin's key), falling back to the deployer.
+    let roleSigner = deployer;
+    if (reuse && process.env.ADMIN_PRIVATE_KEY) {
+      roleSigner = new hre.ethers.Wallet(process.env.ADMIN_PRIVATE_KEY, hre.ethers.provider);
+    }
+    if (!(await token.hasRole(DEFAULT_ADMIN_ROLE, roleSigner.address))) {
+      throw new Error(
+        `${roleSigner.address} does not hold DEFAULT_ADMIN_ROLE on ${asset.symbol} (${address}). ` +
+          (reuse
+            ? `Set ADMIN_PRIVATE_KEY in the root .env to the TOKEN_ADMIN_ADDRESS wallet's private key, then retry.`
+            : `Unexpected on a fresh deploy — the deployer should be the initial admin.`)
+      );
+    }
 
     // The Worker hot wallet must be able to mint withdrawals server-side.
-    const MINTER_ROLE = await token.MINTER_ROLE();
     if (!(await token.hasRole(MINTER_ROLE, backendMinter))) {
-      const grantTx = await token.grantRole(MINTER_ROLE, backendMinter);
+      const grantTx = await token.connect(roleSigner).grantRole(MINTER_ROLE, backendMinter);
       await grantTx.wait();
       console.log(`  granted MINTER_ROLE to backend minter ${backendMinter}`);
     } else {
       console.log(`  backend minter already holds MINTER_ROLE`);
+    }
+
+    // Hand the admin roles over to TOKEN_ADMIN_ADDRESS and let the deployer step
+    // down (fresh deploys only — reused contracts already have their admin).
+    if (!reuse && admin !== deployer.address) {
+      if (!(await token.hasRole(DEFAULT_ADMIN_ROLE, admin))) {
+        const tx = await token.grantRole(DEFAULT_ADMIN_ROLE, admin);
+        await tx.wait();
+        console.log(`  granted DEFAULT_ADMIN_ROLE to ${admin}`);
+      }
+      if (!(await token.hasRole(MINTER_ROLE, admin))) {
+        const tx = await token.grantRole(MINTER_ROLE, admin);
+        await tx.wait();
+        console.log(`  granted MINTER_ROLE to ${admin}`);
+      }
+      if (await token.hasRole(DEFAULT_ADMIN_ROLE, deployer.address)) {
+        const tx = await token.renounceRole(DEFAULT_ADMIN_ROLE, deployer.address);
+        await tx.wait();
+      }
+      if (await token.hasRole(MINTER_ROLE, deployer.address)) {
+        const tx = await token.renounceRole(MINTER_ROLE, deployer.address);
+        await tx.wait();
+      }
+      console.log(`  admin roles handed over to ${admin} (deployer holds no roles now)`);
     }
 
     deployments[asset.id] = {
@@ -117,7 +195,8 @@ async function main() {
     console.log(`TOKEN_ADDRESS_${asset.id.toUpperCase()}=${deployments[asset.id].address}`);
   }
   console.log(`CHAIN_ID=${chainId}`);
-  console.log(`RPC_URL=https://polygon-rpc.com   # when chainId is 137\n`);
+  const rpcHint = chainId === 137 ? 'https://polygon-rpc.com' : env('RPC_URL_SEPOLIA', 'https://ethereum-sepolia-rpc.publicnode.com');
+  console.log(`RPC_URL=${rpcHint}${chainId === 137 ? '' : '   # sepolia testnet'}\n`);
 
   if (chainId !== 137) {
     console.log(`NOTE: you deployed to chainId ${chainId}. Polygon mainnet is 137 — set VITE_NETWORK_ID=137 and CHAIN_ID=137 for production.`);

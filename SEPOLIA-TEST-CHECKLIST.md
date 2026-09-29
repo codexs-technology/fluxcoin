@@ -52,7 +52,7 @@ BACKEND_MINTER_ADDRESS=0x<MINTER_WALLET_ADDRESS>       # isi wallet ka key Step 
 
 `RPC_URL_SEPOLIA=https://rpc.sepolia.org` already set hai — kuch nahi karna.
 
-**Deployer ETH check (0.124 ETH):** 5 contracts + 5 role-grants ≈ 10–11M total gas. Sepolia gas sasta hai (aam taur pe 0.1–3 gwei) → total ~0.01–0.03 ETH lagta hai. **0.124 ETH normally kaafi hai** — sirf agar gas 12+ gwei pe spike ho jaye tab problem (phir faucet se thoda aur le lo).
+**Deployer ETH check (0.124 ETH):** 5 contracts + role wiring ≈ **30 transactions, ~6–8M total gas** (jab `TOKEN_ADMIN_ADDRESS` deployer se alag ho: har asset pe 1 deploy + 1 minter grant + 2 admin handover grants + 2 deployer renounces). Sepolia gas sasta hai (aam taur pe 0.1–3 gwei) → total ~0.005–0.03 ETH lagta hai. **0.124 ETH normally kaafi hai** — sirf agar gas 12+ gwei pe spike ho jaye tab problem (phir faucet se thoda aur le lo).
 
 ---
 
@@ -72,7 +72,7 @@ npm run compile
 npm run deploy:flash:sepolia
 ```
 
-- **Time:** ~2–5 min, **10 transactions** (5 deploy + 5 `grantRole`)
+- **Time:** ~3–6 min, **~30 transactions** jab `TOKEN_ADMIN_ADDRESS` deployer se alag ho — har asset pe: 1 deploy + 1 minter `grantRole` + 2 admin handover grants + 2 deployer renounces. (Agar admin = deployer ho toh sirf 5 deploy + 5 grants.)
 - Console me aisa dikhega:
 
 ```
@@ -81,15 +81,38 @@ network        : sepolia (chainId 11155111)
 deployer       : 0x2DA543190bEFE31c2183c1ba286362A9eDE208B5
 admin          : 0x<ADMIN>
 backend minter : 0x<MINTER>
+admin handover : yes — deployer wires roles first, then hands over to 0x<ADMIN>
 
 Deploying Flash USDT (USDT, 6 decimals)…
   USDT -> 0xAbC123...def456
   granted MINTER_ROLE to backend minter 0x<MINTER>
+  granted DEFAULT_ADMIN_ROLE to 0x<ADMIN>
+  granted MINTER_ROLE to 0x<ADMIN>
+  admin roles handed over to 0x<ADMIN> (deployer holds no roles now)
 ...
 Saved deployment manifest -> e:\Flush Coin\.env.flash-assets.json
 ```
 
 - End me `NOTE: you deployed to chainId 11155111` print hoga — **yeh normal hai** (yehi test hai).
+- **Role flow (naya fix):** pehli Sepolia run me `grantRole` isliye revert hua tha ke deployer ke paas `DEFAULT_ADMIN_ROLE` nahi tha (constructor roles `TOKEN_ADMIN_ADDRESS` ko deta hai). Ab script contract ko **deployer ko temporary admin** bana ke deploy karti hai → minter ko role deti hai → roles `TOKEN_ADMIN_ADDRESS` ko handover karti hai → deployer renounce kar deta hai. Final state wahi hai jo chahiye: **admin = dono roles, minter = MINTER_ROLE, deployer = koi role nahi.**
+
+### 🔁 1.1 — Deploy PARTIALLY FAIL ho jaye to (RESUME)
+
+Script ab **idempotent** hai (har grant se pehle `hasRole` check hota hai — dobara chalao toh duplicate grant skip hoga) aur **resumable** bhi — pehle se deployed contract dobara deploy kiye bina reuse ho sakta hai:
+
+```env
+# Root .env me TEMPORARILY add karo (sirf resume run ke liye):
+FLASH_REUSE_USDT_ADDRESS=0x<pehle se deployed USDT address>
+ADMIN_PRIVATE_KEY=0x<ADMIN_WALLET ka private key>   # reused contract ka jo admin hai
+```
+
+```powershell
+npm run deploy:flash:sepolia   # USDT reuse hoga, baqi 4 fresh deploy honge
+```
+
+- Reused contract pe role wiring **admin wallet** sign karta hai (`ADMIN_PRIVATE_KEY` se) — us wallet me thoda Sepolia ETH chahiye (~0.001).
+- Run ke baad dono lines `.env` se **hata do** — `ADMIN_PRIVATE_KEY` sirf resume ke waqt chahiye (fresh deploys pe ignore hota hai, phir bhi clean rakho).
+- **Pehli failed run ka note:** us run me sirf Flash USDT deploy hua tha (`0x3b4b2157997C28a645601a83ECC685815127Bb5C`) lekin minter role grant revert ho gaya tha, aur manifest save NAHI hui. Is contract ko reuse karne ke liye upar wala tarika hi hai (admin key chahiye hoga). **Simple option: fresh re-run** — purana contract testnet pe unused reh jayega, koi nuksan nahi (sirf ~0.002 ETH gas gaya).
 
 ## 2️⃣ Step 2 — 5 contract addresses KAHAN milengi
 
@@ -366,6 +389,7 @@ npx wrangler pages deploy dist --project-name fluxcoin
 | Problem | Fix |
 |---------|-----|
 | `insufficient funds for gas` (deploy ke waqt) | Deployer me Sepolia ETH kam hai — faucet se top-up, phir `npm run deploy:flash:sepolia` |
+| `grantRole` pe `ProviderError: execution reverted` (pehli wali failed deploy) | **FIXED** — deployer ke paas `DEFAULT_ADMIN_ROLE` nahi tha (constructor roles `TOKEN_ADMIN_ADDRESS` ko deta hai). Naya script deployer ko temporary admin bana ke roles wire karta hai. **Fresh re-run karo**; purana contract reuse karna ho to Section 1.1 |
 | Deploy ne `NOTE: you deployed to chainId 11155111` bola | **Normal hai** — yeh Sepolia test hai, mainnet nahi |
 | Health me `assetsConfigured: 0` | `wrangler.jsonc` me `TOKEN_ADDRESS_*` nahi bhare, YA Step 6 worker redeploy nahi hua |
 | Health me `mode: "dry-run"` | `MINTER_PRIVATE_KEY` secret missing — Step 5.3-A |
