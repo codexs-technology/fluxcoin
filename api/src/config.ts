@@ -5,7 +5,7 @@
  * `npx wrangler secret put <NAME>`), never from the browser.
  *
  * PRODUCTION CHAIN IS POLYGON (137) — Sepolia (11155111) is only for testing.
- * Every asset has its OWN contract (Flash USDT/BTC/ETH/TRX/SOL, see
+ * Every asset has its OWN contract (USDT/BTC/ETH/TRX/SOL, see
  * api/src/assets.ts). Limits are configured in WHOLE tokens (EARN_MIN_TOKENS=1
  * means 1 USDT *or* 1 BTC) and converted per asset by `assetLimits()` using
  * that asset's decimals, so a 6-decimal USDT and an 18-decimal ETH compare
@@ -13,6 +13,7 @@
  */
 import { formatUnits, parseUnits } from 'viem';
 import { anyAssetConfigured, buildAssets, type AssetConfig, type AssetId } from './assets.js';
+import { describePrivateKey, normalizePrivateKey, type PrivateKeyDiagnostics } from './keys.js';
 
 export type FluxConfig = {
   storage: 'kv' | 'memory';
@@ -26,9 +27,15 @@ export type FluxConfig = {
     faucetAddress: string;
     explorerUrl: string;
   };
-  /** Per-asset Flash tokens (Flash USDT/BTC/ETH/TRX/SOL) with their own addresses. */
+  /** Per-asset Flash tokens (USDT/BTC/ETH/TRX/SOL) with their own addresses. */
   assets: Record<AssetId, AssetConfig>;
-  keys: { minterPrivateKey: string };
+  keys: {
+    minterPrivateKey: string;
+    /** Safe diagnostics for /api/health (length, 0x prefix, hex-ness) — never the key itself. */
+    minterPrivateKeyDiagnostics: PrivateKeyDiagnostics | null;
+    /** Non-null when the secret is set but cannot be a valid secp256k1 key. */
+    minterPrivateKeyProblem: string | null;
+  };
   gasless: {
     /** requested mode: 'auto' | 'paymaster' | 'server' | 'dry-run' */
     requested: string;
@@ -56,7 +63,7 @@ export const DECIMALS = 18;
 export const DEFAULT_CHAIN_ID = 137;
 
 const DEFAULT_RPC: Record<number, string> = {
-  137: 'https://polygon-rpc.com',
+  137: 'https://polygon-bor-rpc.publicnode.com',
   11155111: 'https://rpc.chainlist.io/sepolia'
 };
 
@@ -94,7 +101,7 @@ export function weiToTokens(wei: bigint | string, decimals: number = DECIMALS): 
 /**
  * The configured whole-token limits converted to base units for ONE asset.
  * This is the heart of the per-asset contract architecture: "1" minimum means
- * 1_000_000 base units for Flash USDT (6d) but 1e18 for Flash ETH (18d).
+ * 1_000_000 base units for USDT (6d) but 1e18 for Flash ETH (18d).
  */
 export function assetLimits(config: FluxConfig, decimals: number) {
   const toWei = (tokens: string) => parseUnits(tokens, decimals);
@@ -133,7 +140,24 @@ export function buildConfig(env: Record<string, unknown>): FluxConfig {
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
-  const rpcUrl = str(env, 'RPC_URL', DEFAULT_RPC[chainId] || 'https://polygon-rpc.com');
+  const rpcUrl = str(env, 'RPC_URL', DEFAULT_RPC[chainId] || 'https://polygon-bor-rpc.publicnode.com');
+
+  // Normalize the sponsor key ONCE here so every consumer (chain.ts wallet,
+  // paymaster.ts smart-account owner) sees the canonical `0x` + 64 hex form.
+  // A dirty-but-valid secret (trailing newline, double `0x`, bare hex) is
+  // cleaned up; a truly malformed one keeps its raw value so withdrawals fail
+  // loudly with a descriptive message instead of viem's cryptic one.
+  const minterRaw = str(env, 'MINTER_PRIVATE_KEY', str(env, 'SPONSOR_PRIVATE_KEY', ''));
+  let minterPrivateKey = minterRaw;
+  let minterPrivateKeyProblem: string | null = null;
+  if (minterRaw) {
+    try {
+      minterPrivateKey = normalizePrivateKey(minterRaw);
+    } catch (error) {
+      minterPrivateKeyProblem = (error as Error).message;
+      console.error(`[config] ${minterPrivateKeyProblem}`);
+    }
+  }
 
   return {
     storage: env.FLUXCOIN_KV ? 'kv' : 'memory',
@@ -151,7 +175,9 @@ export function buildConfig(env: Record<string, unknown>): FluxConfig {
     },
     assets: buildAssets(env),
     keys: {
-      minterPrivateKey: str(env, 'MINTER_PRIVATE_KEY', str(env, 'SPONSOR_PRIVATE_KEY', ''))
+      minterPrivateKey,
+      minterPrivateKeyDiagnostics: minterRaw ? describePrivateKey(minterRaw) : null,
+      minterPrivateKeyProblem
     },
     gasless: {
       requested: (str(env, 'GASLESS_MODE', 'auto') || 'auto').toLowerCase(),
@@ -185,6 +211,11 @@ export function configWarnings(config: FluxConfig): string[] {
   }
   if (config.session.secret === 'fluxcoin-dev-session-secret-change-me') {
     warnings.push('SESSION_SECRET is the public default — set a long random secret before production');
+  }
+  if (config.keys.minterPrivateKeyProblem) {
+    warnings.push(
+      `MINTER_PRIVATE_KEY is set but malformed — real withdrawals will fail until it is re-set: ${config.keys.minterPrivateKeyProblem}`
+    );
   }
 
   // Per-asset wiring: an asset without a contract address can still earn/withdraw,

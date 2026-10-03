@@ -12,7 +12,7 @@ import {
 } from '../wallet/dex.js';
 import { getPairAddress, getReadProvider } from '../wallet/token.js';
 import { explorerTxUrl, explorerAddressUrl } from '../wallet/chains.js';
-import { ROUTER_ADDRESS } from '../contracts/addresses.js';
+import { ROUTER_ADDRESS, ROUTER_LABEL } from '../contracts/addresses.js';
 import { getFlashAsset } from '../contracts/assets.js';
 
 /**
@@ -163,7 +163,7 @@ export default function TokenSwap() {
     <div className="space-y-3 font-mono">
       <div className="flex items-center justify-between pb-1 border-b border-slate-800">
         <span className="text-xs font-bold text-cyan-400 uppercase tracking-wider">DEX SWAP</span>
-        <span className="text-[10px] text-slate-500">UNISWAP V2 ROUTER {ROUTER_ADDRESS ? '• LIVE' : '• UNCONFIGURED'}</span>
+        <span className="text-[10px] text-slate-500">{ROUTER_LABEL} ROUTER {ROUTER_ADDRESS ? '• LIVE' : '• UNCONFIGURED'}</span>
       </div>
 
       <div className="grid grid-cols-2 gap-1.5 p-0.5 bg-[#070d14] rounded border border-slate-800">

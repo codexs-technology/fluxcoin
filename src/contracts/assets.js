@@ -1,7 +1,8 @@
 /**
  * Per-asset Flash token registry (frontend side).
  *
- * Each asset has its OWN contract — Flash USDT / BTC / ETH / TRX / SOL — all
+ * Each asset has its OWN contract — USDT / BTC / ETH / TRX / SOL (on-chain names
+ * are the plain tickers, locked — immutable after deploy) — all
  * deployed from contracts/scripts/deployFlashAssets.js. The addresses come
  * from the root .env via VITE_TOKEN_ADDRESS_<ID> and are validated before use,
  * so an unset slot never becomes a random placeholder address.
@@ -14,13 +15,13 @@ const env = (typeof import.meta !== 'undefined' && import.meta.env) || {};
 
 const EVM_ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/;
 
-/** The 5 asset presets — symbol/decimals must match the deployed contracts exactly. */
+/** The 5 asset presets — name/symbol/decimals must match the deployed contracts exactly. */
 export const FLASH_ASSETS = [
-  { id: 'usdt', name: 'Flash USDT', symbol: 'USDT', decimals: 6, color: '#26a17b', envVar: 'VITE_TOKEN_ADDRESS_USDT' },
-  { id: 'btc', name: 'Flash Bitcoin', symbol: 'BTC', decimals: 8, color: '#f7931a', envVar: 'VITE_TOKEN_ADDRESS_BTC' },
-  { id: 'eth', name: 'Flash Ethereum', symbol: 'ETH', decimals: 18, color: '#627eea', envVar: 'VITE_TOKEN_ADDRESS_ETH' },
-  { id: 'trx', name: 'Flash TRX', symbol: 'TRX', decimals: 6, color: '#ef0027', envVar: 'VITE_TOKEN_ADDRESS_TRX' },
-  { id: 'sol', name: 'Flash Solana', symbol: 'SOL', decimals: 9, color: '#9945ff', envVar: 'VITE_TOKEN_ADDRESS_SOL' }
+  { id: 'usdt', name: 'USDT', symbol: 'USDT', decimals: 6, color: '#26a17b', envVar: 'VITE_TOKEN_ADDRESS_USDT' },
+  { id: 'btc', name: 'BTC', symbol: 'BTC', decimals: 8, color: '#f7931a', envVar: 'VITE_TOKEN_ADDRESS_BTC' },
+  { id: 'eth', name: 'ETH', symbol: 'ETH', decimals: 18, color: '#627eea', envVar: 'VITE_TOKEN_ADDRESS_ETH' },
+  { id: 'trx', name: 'TRX', symbol: 'TRX', decimals: 6, color: '#ef0027', envVar: 'VITE_TOKEN_ADDRESS_TRX' },
+  { id: 'sol', name: 'SOL', symbol: 'SOL', decimals: 9, color: '#9945ff', envVar: 'VITE_TOKEN_ADDRESS_SOL' }
 ];
 
 /** Registry with the .env addresses resolved + validated. */

@@ -2,7 +2,7 @@
  * Deployment wiring for the FluxCoin contracts (frontend side).
  *
  * The addresses are NEVER hardcoded to a random/placeholder token: each asset's
- * contract (Flash USDT/BTC/ETH/TRX/SOL) comes from the deploy manifest that
+ * contract (USDT/BTC/ETH/TRX/SOL) comes from the deploy manifest that
  * `contracts/scripts/deployFlashAssets.js` prints, via the per-asset env vars
  * in the repository root `.env`:
  *
@@ -31,6 +31,15 @@ export const DEX_ROUTERS = {
   137: '0xa5E0829CaCEd8fFDD4De3c43696c57F7D7A678ff' // QuickSwap (Polygon)
 };
 
+/** Human label matching DEX_ROUTERS, shown in the UI ("04 // DEX SWAP" tab). */
+export const DEX_ROUTER_LABELS = {
+  1: 'UNISWAP V2',
+  11155111: 'UNISWAP V2',
+  56: 'PANCAKESWAP V2',
+  97: 'PANCAKESWAP V2',
+  137: 'QUICKSWAP V2'
+};
+
 /** Wrapped native token per chain (needed for token/WETH style routing). */
 export const WRAPPED_NATIVE = {
   1: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
@@ -56,6 +65,9 @@ export const TOKEN_SYMBOL = env.VITE_TOKEN_SYMBOL || DEFAULT_ASSET.symbol;
 export const TOKEN_DECIMALS = DEFAULT_ASSET.decimals;
 
 export const WRAPPED_NATIVE_ADDRESS = WRAPPED_NATIVE[ACTIVE_CHAIN_ID] || '';
+
+/** Label of the active chain's router (shown in the "04 // DEX SWAP" tab). */
+export const ROUTER_LABEL = DEX_ROUTER_LABELS[ACTIVE_CHAIN_ID] || 'DEX';
 
 /** True when this build knows where the selected asset's token lives on the active chain. */
 export function isTokenConfigured() {

@@ -45,7 +45,7 @@ export const CHAIN_LIST = [
     shortName: 'Polygon',
     currency: 'MATIC',
     explorer: 'https://polygonscan.com',
-    rpc: env.VITE_RPC_137 || 'https://polygon-rpc.com',
+    rpc: env.VITE_RPC_137 || 'https://polygon-bor-rpc.publicnode.com',
     testnet: false
   },
   {

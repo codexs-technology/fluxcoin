@@ -25,6 +25,9 @@ api/.dev.vars
 api/.wrangler/
 api/dist/
 
+# Local scratch/session file (64-hex material — never commit)
+session.txt.txt
+
 # --- build & test output ----------------------------------------------------
 artifacts/
 cache/

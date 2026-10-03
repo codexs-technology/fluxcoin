@@ -1,6 +1,6 @@
 /**
  * useCoinBalance — the bridge between the site's *earned* balance and the real
- * per-asset Flash ERC-20 contracts (Flash USDT/BTC/ETH/TRX/SOL on Polygon).
+ * per-asset Flash ERC-20 contracts (USDT/BTC/ETH/TRX/SOL on Polygon).
  *
  * Flow implemented here (all values come from the backend, never from the browser):
  *  1. `signIn()`   -> SIWE-style signature by the connected wallet (POST /api/auth/*)

@@ -62,7 +62,7 @@ type Bindings = {
   RPC_URL?: string;
   TOKEN_ADDRESS?: string;
   FAUCET_ADDRESS?: string;
-  /** Per-asset FlashToken contracts (Flash USDT/BTC/ETH/TRX/SOL). */
+  /** Per-asset FlashToken contracts (USDT/BTC/ETH/TRX/SOL). */
   TOKEN_ADDRESS_USDT?: string;
   TOKEN_ADDRESS_BTC?: string;
   TOKEN_ADDRESS_ETH?: string;
@@ -266,7 +266,15 @@ app.get('/api/health', async (c) => {
     gasless: {
       mode: resolveGaslessMode(config),
       /** The user never pays gas in any route — advertised for the flow test + UI. */
-      userGasCost: '0'
+      userGasCost: '0',
+      /**
+       * Safe shape check for the sponsor secret (raw length, `0x` prefix,
+       * hex-ness, cleaned length — the key material itself is NEVER included).
+       * `problem` is null once the key normalizes cleanly.
+       */
+      sponsorKey: config.keys.minterPrivateKeyDiagnostics
+        ? { ...config.keys.minterPrivateKeyDiagnostics, problem: config.keys.minterPrivateKeyProblem }
+        : null
     },
     warnings: configWarnings(config)
   });

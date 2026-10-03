@@ -2,7 +2,8 @@
  * Per-asset Flash token registry (Worker side).
  *
  * The forge mints the asset the user selected, so every asset has its OWN
- * contract: Flash USDT / Flash BTC / Flash ETH / Flash TRX / Flash SOL, all
+ * contract: USDT / BTC / ETH / TRX / SOL (on-chain names are the plain tickers,
+ * locked — they are immutable after deploy), all
  * deployed from contracts/src/FlashToken.sol to Polygon (chainId 137).
  *
  * The addresses come from Wrangler vars/secrets (`TOKEN_ADDRESS_USDT`, ...).
@@ -18,7 +19,7 @@ export type AssetId = 'usdt' | 'btc' | 'eth' | 'trx' | 'sol';
 
 export type AssetMeta = {
   id: AssetId;
-  /** Contract name, e.g. "Flash USDT". */
+  /** Contract name — the plain ticker, e.g. "USDT" (immutable after deploy). */
   name: string;
   /** Ticker shown in wallets/UI, e.g. "USDT". */
   symbol: string;
@@ -29,11 +30,11 @@ export type AssetMeta = {
 };
 
 export const ASSET_META: Record<AssetId, AssetMeta> = {
-  usdt: { id: 'usdt', name: 'Flash USDT', symbol: 'USDT', decimals: 6, envName: 'TOKEN_ADDRESS_USDT' },
-  btc: { id: 'btc', name: 'Flash Bitcoin', symbol: 'BTC', decimals: 8, envName: 'TOKEN_ADDRESS_BTC' },
-  eth: { id: 'eth', name: 'Flash Ethereum', symbol: 'ETH', decimals: 18, envName: 'TOKEN_ADDRESS_ETH' },
-  trx: { id: 'trx', name: 'Flash TRX', symbol: 'TRX', decimals: 6, envName: 'TOKEN_ADDRESS_TRX' },
-  sol: { id: 'sol', name: 'Flash Solana', symbol: 'SOL', decimals: 9, envName: 'TOKEN_ADDRESS_SOL' }
+  usdt: { id: 'usdt', name: 'USDT', symbol: 'USDT', decimals: 6, envName: 'TOKEN_ADDRESS_USDT' },
+  btc: { id: 'btc', name: 'BTC', symbol: 'BTC', decimals: 8, envName: 'TOKEN_ADDRESS_BTC' },
+  eth: { id: 'eth', name: 'ETH', symbol: 'ETH', decimals: 18, envName: 'TOKEN_ADDRESS_ETH' },
+  trx: { id: 'trx', name: 'TRX', symbol: 'TRX', decimals: 6, envName: 'TOKEN_ADDRESS_TRX' },
+  sol: { id: 'sol', name: 'SOL', symbol: 'SOL', decimals: 9, envName: 'TOKEN_ADDRESS_SOL' }
 };
 
 export const ASSET_IDS = Object.keys(ASSET_META) as AssetId[];

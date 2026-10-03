@@ -16,12 +16,12 @@ import {
   parseAbi,
   type Address,
   type Chain,
-  type Hex,
   type PublicClient
 } from 'viem';
 import { bsc, bscTestnet, mainnet, polygon, sepolia } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 import type { FluxConfig } from './config.js';
+import { normalizePrivateKey } from './keys.js';
 
 const KNOWN_CHAINS: Record<number, Chain> = {
   1: mainnet,
@@ -69,10 +69,6 @@ export function getPublicClient(config: FluxConfig): PublicClient | null {
   const client = createPublicClient({ chain: resolveChain(config), transport: http(config.chain.rpcUrl) });
   clientCache.set(cacheKey, client);
   return client;
-}
-
-function normalizeKey(rawKey: string): Hex {
-  return (rawKey.startsWith('0x') ? rawKey : `0x${rawKey}`) as Hex;
 }
 
 /**
@@ -172,7 +168,7 @@ export async function settleServerSponsored({
   if (!config.chain.rpcUrl) throw new Error('RPC_URL is not set (wrangler.jsonc -> vars)');
   if (!config.keys.minterPrivateKey) throw new Error('MINTER_PRIVATE_KEY is not set (wrangler secret)');
 
-  const account = privateKeyToAccount(normalizeKey(config.keys.minterPrivateKey));
+  const account = privateKeyToAccount(normalizePrivateKey(config.keys.minterPrivateKey));
   const token = tokenAddress as Address;
   const client = createWalletClient({
     account,

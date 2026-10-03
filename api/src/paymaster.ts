@@ -21,6 +21,7 @@ import { createSmartAccountClient } from 'permissionless';
 import { toSimpleSmartAccount } from 'permissionless/accounts';
 import { createPimlicoClient } from 'permissionless/clients/pimlico';
 import { privateKeyToAccount } from 'viem/accounts';
+import { normalizePrivateKey } from './keys.js';
 
 const ERC20_ABI = parseAbi(['function transfer(address to, uint256 amount) returns (bool)']);
 
@@ -63,10 +64,6 @@ function chainFor(chainId: number, rpcUrl: string): Chain {
   );
 }
 
-function normalizeKey(rawKey: string): Hex {
-  return (rawKey.startsWith('0x') ? rawKey : `0x${rawKey}`) as Hex;
-}
-
 /**
  * Submits the sponsored transfer. Throws with an actionable message when the
  * Worker is missing the pieces the bundler needs, so the withdrawal is refunded
@@ -85,7 +82,7 @@ export async function executeGaslessWithdrawal(
 
   const chain = chainFor(chainId, rpcUrl);
   const publicClient = createPublicClient({ chain, transport: http(rpcUrl) });
-  const signer = privateKeyToAccount(normalizeKey(sponsorPrivateKey));
+  const signer = privateKeyToAccount(normalizePrivateKey(sponsorPrivateKey));
 
   const account = await toSimpleSmartAccount({
     client: publicClient,
