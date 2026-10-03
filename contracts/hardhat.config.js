@@ -53,7 +53,8 @@ module.exports = {
       accounts
     },
     polygon: {
-      url: process.env.RPC_URL_POLYGON || 'https://polygon-rpc.com',
+      // polygon-rpc.com is currently dead ("API key disabled"); publicnode (bor) is the tested default.
+      url: process.env.RPC_URL_POLYGON || 'https://polygon-bor-rpc.publicnode.com',
       chainId: 137,
       accounts
     },

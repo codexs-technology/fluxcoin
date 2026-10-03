@@ -16,6 +16,7 @@
     "deploy:flash:sepolia": "hardhat run scripts/deployFlashAssets.js --network sepolia",
     "deploy:flash:polygon": "hardhat run scripts/deployFlashAssets.js --network polygon",
     "grant:minter": "hardhat run scripts/grantMinter.js --network sepolia",
+    "liquidity:dex": "hardhat run scripts/addLiquidity.js --network polygon",
     "liquidity:uniswap": "hardhat run scripts/addLiquidity.js --network sepolia"
   },
   "devDependencies": {

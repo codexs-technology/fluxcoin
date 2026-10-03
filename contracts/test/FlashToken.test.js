@@ -2,7 +2,7 @@ const { expect } = require('chai');
 const { ethers } = require('hardhat');
 
 /**
- * FlashToken — the per-asset ERC-20 (Flash USDT/BTC/ETH/TRX/SOL).
+ * FlashToken — the per-asset ERC-20 (USDT/BTC/ETH/TRX/SOL).
  *
  * Covers the properties the withdrawal pipeline relies on:
  *   - per-asset name/symbol/decimals are fixed at deployment
@@ -14,14 +14,14 @@ describe('FlashToken', function () {
   async function deploy(decimals = 6, initialSupply = 0, maxSupply = 1_000_000n) {
     const [admin, minter, user] = await ethers.getSigners();
     const factory = await ethers.getContractFactory('FlashToken');
-    const token = await factory.deploy('Flash USDT', 'USDT', decimals, admin.address, initialSupply, maxSupply);
+    const token = await factory.deploy('USDT', 'USDT', decimals, admin.address, initialSupply, maxSupply);
     await token.waitForDeployment();
     return { token, admin, minter, user };
   }
 
   it('stores the per-asset metadata', async function () {
     const { token } = await deploy(6);
-    expect(await token.name()).to.equal('Flash USDT');
+    expect(await token.name()).to.equal('USDT');
     expect(await token.symbol()).to.equal('USDT');
     expect(await token.decimals()).to.equal(6);
   });

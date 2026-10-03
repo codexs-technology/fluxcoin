@@ -7,16 +7,17 @@ import {ERC20Burnable} from "@openzeppelin/contracts/token/ERC20/extensions/ERC2
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 
 /**
- * @title FlashToken — one mintable ERC-20 per asset (Flash USDT/BTC/ETH/TRX/SOL)
+ * @title FlashToken — one mintable ERC-20 per asset (USDT/BTC/ETH/TRX/SOL)
  *
  * The forge mints the asset the user selected, so EVERY asset gets its own
- * deployment of this contract with its native precision:
+ * deployment of this contract with its native precision. The on-chain NAME is
+ * the plain ticker — LOCKED decision: names are immutable after deploy:
  *
- *   Flash USDT  -> "Flash USDT",  "USDT", 6 decimals
- *   Flash BTC   -> "Flash Bitcoin","BTC",  8 decimals
- *   Flash ETH   -> "Flash Ethereum","ETH", 18 decimals
- *   Flash TRX   -> "Flash TRX",   "TRX",  6 decimals
- *   Flash SOL   -> "Flash Solana", "SOL",  9 decimals
+ *   USDT -> "USDT", 6 decimals
+ *   BTC  -> "BTC",  8 decimals
+ *   ETH  -> "ETH", 18 decimals
+ *   TRX  -> "TRX",  6 decimals
+ *   SOL  -> "SOL",  9 decimals
  *
  * Design rules (identical to FluxCoin):
  *   1. 100% standard ERC-20: no fee-on-transfer hook, so DEX routers and
@@ -39,7 +40,7 @@ contract FlashToken is ERC20, ERC20Permit, ERC20Burnable, AccessControl {
     event BackendMint(address indexed to, uint256 amount, string reason);
 
     /**
-     * @param name_       Token name, e.g. "Flash USDT".
+     * @param name_       Token name, e.g. "USDT" (plain ticker — immutable after deploy).
      * @param symbol_     Token symbol, e.g. "USDT".
      * @param decimals_   Asset precision (6/8/18/6/9 for the five presets).
      * @param admin       Receives DEFAULT_ADMIN_ROLE + MINTER_ROLE (treasury/multisig).

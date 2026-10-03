@@ -2,7 +2,7 @@
 
 FluxCoin is a coin-generating ("forge") site whose earned coins are backed by real
 ERC-20 tokens: users connect a real wallet, earn coins into an **on-site balance**, and
-withdraw them on-chain as **Flash USDT / BTC / ETH / TRX / SOL** (the selected preset)
+withdraw them on-chain as **USDT / BTC / ETH / TRX / SOL** (the selected preset)
 with **0 gas cost for the user** (sponsored ERC-4337 UserOperation, or a project wallet
 that mints/transfers and pays the gas).
 

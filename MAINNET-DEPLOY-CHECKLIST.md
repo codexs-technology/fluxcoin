@@ -1,6 +1,6 @@
 # 🚀 FluxCoin — Mainnet Deploy Checklist (5 Flash contracts, Polygon 137)
 
-> Yeh ek **beginner-friendly, copy-paste ready** ordered checklist hai — `contracts/scripts/deployFlashAssets.js` se **Polygon mainnet (chainId 137)** pe 5 Flash token contracts (Flash USDT / BTC / ETH / TRX / SOL) deploy karne ke liye.
+> Yeh ek **beginner-friendly, copy-paste ready** ordered checklist hai — `contracts/scripts/deployFlashAssets.js` se **Polygon mainnet (chainId 137)** pe 5 Flash token contracts (USDT / BTC / ETH / TRX / SOL — plain ticker names) deploy karne ke liye.
 >
 > Detail wali guide `DEPLOYMENT.md` me hai — yeh file sirf **step-by-step execution** ke liye hai.
 > Saare commands **repo root (`e:\Flush Coin`)** se chalane ke liye likhe hain jab tak `cd contracts` na bola jaye.
@@ -129,7 +129,7 @@ npm run deploy:flash:polygon
 
 **Kya hoga:** Har asset ke liye console me aisa dikhega:
 ```
-Deploying Flash USDT (USDT, 6 decimals)…
+Deploying USDT (USDT, 6 decimals)…
   USDT -> 0xAbC123...def456
   granted MINTER_ROLE to backend minter 0xYourMinterAddress
 ...
@@ -271,7 +271,7 @@ Har address kholo: `https://polygonscan.com/address/<CONTRACT_ADDRESS>`
 
 | Kya check karna | Kya dikhna chahiye |
 |-----------------|--------------------|
-| Contract name | "Flash USDT" / "Flash Bitcoin" / etc. |
+| Contract name | "USDT" / "BTC" / "ETH" / "TRX" / "SOL" (plain tickers) |
 | Contract Creator | Aapka **deployer** address |
 | Token Tracker | Symbol (USDT/BTC/...) + decimals |
 | Tx list | Deploy + `grantRole` transactions |

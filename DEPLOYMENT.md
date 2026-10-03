@@ -1,6 +1,6 @@
 # FluxCoin — Flash Assets Deployment Guide (5 per-asset contracts, Polygon 137)
 
-Yeh guide 5 alag Flash token contracts (Flash USDT / BTC / ETH / TRX / SOL), Cloudflare Worker, aur frontend ko **Polygon mainnet (chainId 137)** pe production-ready deploy karne ke liye hai. Sepolia sirf testing ke liye hai (Step 9).
+Yeh guide 5 alag Flash token contracts (USDT / BTC / ETH / TRX / SOL — on-chain names plain tickers hain), Cloudflare Worker, aur frontend ko **Polygon mainnet (chainId 137)** pe production-ready deploy karne ke liye hai. Sepolia sirf testing ke liye hai (Step 9).
 
 > 🚀 **Beginner-friendly ordered checklist** (copy-paste ready commands): [`MAINNET-DEPLOY-CHECKLIST.md`](MAINNET-DEPLOY-CHECKLIST.md) — yeh detail guide ka step-by-step companion hai.
 
@@ -8,11 +8,11 @@ Yeh guide 5 alag Flash token contracts (Flash USDT / BTC / ETH / TRX / SOL), Clo
 
 | Asset | Contract name | Symbol | Decimals | Env var (Worker) | Env var (frontend) |
 |-------|--------------|--------|----------|------------------|--------------------|
-| USDT (default) | Flash USDT | USDT | 6 | `TOKEN_ADDRESS_USDT` | `VITE_TOKEN_ADDRESS_USDT` |
-| BTC | Flash Bitcoin | BTC | 8 | `TOKEN_ADDRESS_BTC` | `VITE_TOKEN_ADDRESS_BTC` |
-| ETH | Flash Ethereum | ETH | 18 | `TOKEN_ADDRESS_ETH` | `VITE_TOKEN_ADDRESS_ETH` |
-| TRX | Flash TRX | TRX | 6 | `TOKEN_ADDRESS_TRX` | `VITE_TOKEN_ADDRESS_TRX` |
-| SOL | Flash Solana | SOL | 9 | `TOKEN_ADDRESS_SOL` | `VITE_TOKEN_ADDRESS_SOL` |
+| USDT (default) | USDT | USDT | 6 | `TOKEN_ADDRESS_USDT` | `VITE_TOKEN_ADDRESS_USDT` |
+| BTC | BTC | BTC | 8 | `TOKEN_ADDRESS_BTC` | `VITE_TOKEN_ADDRESS_BTC` |
+| ETH | ETH | ETH | 18 | `TOKEN_ADDRESS_ETH` | `VITE_TOKEN_ADDRESS_ETH` |
+| TRX | TRX | TRX | 6 | `TOKEN_ADDRESS_TRX` | `VITE_TOKEN_ADDRESS_TRX` |
+| SOL | SOL | SOL | 9 | `TOKEN_ADDRESS_SOL` | `VITE_TOKEN_ADDRESS_SOL` |
 
 Jab user USDT select karega → earn site-balance pe credit hoga → withdraw pe **USDT contract se mint** hoga. BTC select → BTC contract se. Har asset ka apna balance, apna cooldown, apna daily cap hai.
 
@@ -111,10 +111,14 @@ FLASH_MAX_SUPPLY_ETH=120000000
 ## Step 5 — Contracts verify karo (Polygonscan) — optional but recommended
 
 ```powershell
-npx hardhat verify --network polygon <USDT_ADDRESS> "Flash USDT" "USDT" 6 <ADMIN_ADDRESS> 0 1000000000
+npx hardhat verify --network polygon <USDT_ADDRESS> "USDT" "USDT" 6 <DEPLOYER_ADDRESS> 0 1000000000
+npx hardhat verify --network polygon <BTC_ADDRESS>  "BTC"  "BTC"  8 <DEPLOYER_ADDRESS> 0 21000000
+npx hardhat verify --network polygon <ETH_ADDRESS>  "ETH"  "ETH"  18 <DEPLOYER_ADDRESS> 0 120000000
+npx hardhat verify --network polygon <TRX_ADDRESS>  "TRX"  "TRX"  6 <DEPLOYER_ADDRESS> 0 1000000000
+npx hardhat verify --network polygon <SOL_ADDRESS>  "SOL"  "SOL"  9 <DEPLOYER_ADDRESS> 0 1000000000
 ```
 
-(Har contract ke liye uske address + params repeat karo. `initialSupply=0`, `maxSupplyCap` jo deploy script ne print kiya.)
+(4th arg = `<DEPLOYER_ADDRESS>` = deployer wallet address — deploy script constructor mein DEPLOYER ko initial admin banata hai, roles baad mein TOKEN_ADMIN ko hand over hote hain. Har contract ke liye uske address + params repeat karo. `initialSupply=0`, `maxSupplyCap` jo deploy script ne print kiya.)
 
 ## Step 6 — Cloudflare Worker config + secrets
 
