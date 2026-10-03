@@ -65,12 +65,16 @@ module.exports = {
     }
   },
   etherscan: {
-    apiKey: {
-      sepolia: process.env.ETHERSCAN_API_KEY || '',
-      mainnet: process.env.ETHERSCAN_API_KEY || '',
-      bsc: process.env.BSCSCAN_API_KEY || '',
-      polygon: process.env.POLYGONSCAN_API_KEY || ''
-    }
+    // Etherscan V2 unified API: ONE free key (from an etherscan.io account) works
+    // for ALL chains (Polygon, Ethereum, BSC, Sepolia, ...).
+    // MUST be a flat string — an object map like { polygon: ... } makes the plugin
+    // fall back to the dead V1 per-chain endpoints (api.polygonscan.com now returns
+    // HTML, causing "Unexpected token '<', \"<html...\" is not valid JSON").
+    apiKey:
+      process.env.POLYGONSCAN_API_KEY ||
+      process.env.ETHERSCAN_API_KEY ||
+      process.env.BSCSCAN_API_KEY ||
+      ''
   },
   paths: {
     sources: './src',
