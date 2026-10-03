@@ -26,16 +26,16 @@
 		"SITE_DOMAIN": "fluxcoin.pages.dev",
 		"SITE_URL": "https://fluxcoin.pages.dev",
 		// PRODUCTION NETWORK: Polygon PoS (137). Sepolia (11155111) only for testing.
-		"CHAIN_ID": "11155111",
-		"RPC_URL": "https://ethereum-sepolia-rpc.publicnode.com",
+		"CHAIN_ID": "137",
+		"RPC_URL": "https://polygon.drpc.org",
 		// Legacy single FLUX token (optional) + the 5 per-asset FlashToken contract
 		// addresses printed by `contracts/scripts/deployFlashAssets.js` — paste them here.
 		"TOKEN_ADDRESS": "",
-		"TOKEN_ADDRESS_USDT": "0x058E633a14e39E691FB43d2fCcaDc0F264B20d62",
-		"TOKEN_ADDRESS_BTC": "0x93C1A6549ffF57F57d0700a2dc853e49eb7B0b81",
-		"TOKEN_ADDRESS_ETH": "0xA5226f7396342dd598d5b6d9bEafAA400389DF50",
-		"TOKEN_ADDRESS_TRX": "0x0085bb4c92eBc53a8888197EA6c87b56DB927D11",
-		"TOKEN_ADDRESS_SOL": "0x33540B85ca0E766012FBa8716Cb09F46d57C317c",
+		"TOKEN_ADDRESS_USDT": "0x3b4b2157997C28a645601a83ECC685815127Bb5C",
+		"TOKEN_ADDRESS_BTC": "0x13C5D77a7a2B04055f835Af0603D1BD9ae5c0d9C",
+		"TOKEN_ADDRESS_ETH": "0x91e7C005F5a68D837AD57aa7c8A4cA0DC1537a73",
+		"TOKEN_ADDRESS_TRX": "0x789bFfe3360dacc18aD3296F5E0ED434621414B1",
+		"TOKEN_ADDRESS_SOL": "0x806e446e5f9b368DF810a86bA03eeaa7857e064C",
 		"FAUCET_ADDRESS": "",
 		// auto | paymaster | server | dry-run
 		"GASLESS_MODE": "auto",
@@ -43,7 +43,7 @@
 		"PAYMASTER_URL": "",
 		// Keep true until a sponsor key / paymaster is configured: withdrawals are
 		// then validated and booked as SIMULATED instead of failing.
-		"ALLOW_DRY_RUN": "true",
+		"ALLOW_DRY_RUN": "false",
 		"EARN_MIN_TOKENS": "1",
 		"EARN_MAX_TOKENS": "100000",
 		"EARN_COOLDOWN_SECONDS": "20",
