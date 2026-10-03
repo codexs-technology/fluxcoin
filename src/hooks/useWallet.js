@@ -13,6 +13,7 @@ import {
   connectWithInjected,
   connectWithSolana,
   connectWithWalletConnect,
+  connectTrustWallet as connectTrustWalletAction,
   disconnectWallet as disconnectWalletAction,
   restoreWalletSession,
   switchWalletChain
@@ -166,6 +167,44 @@ export function useWallet() {
     }
   }, []);
 
+  /**
+   * Manual "Trust Wallet" connect (pinned button): any rdns build of the
+   * extension or the documented window.trustwallet injection. When the extension
+   * is not installed the error carries code `TRUST_WALLET_NOT_FOUND` so the UI
+   * can fall back to the WalletConnect QR / Trust mobile deep link.
+   */
+  const connectTrustWallet = useCallback(async () => {
+    setError(null);
+    try {
+      const health = await checkBackend({ timeoutMs: 5000 });
+      if (!health.online) {
+        throw new Error(health.error || `The FluxCoin API at ${health.base} is offline.`);
+      }
+
+      const connected = await connectTrustWalletAction();
+      const address = walletManager.getAddress();
+      if (!address) throw new Error('Trust Wallet connected but no address was returned.');
+
+      try {
+        await loginWithWallet();
+      } catch (loginError) {
+        setError(
+          loginError.message ||
+            'Trust Wallet connected, but signature verification failed. Please sign the message to continue.'
+        );
+        throw loginError;
+      }
+
+      return connected;
+    } catch (connectError) {
+      const message = connectError?.message || 'Trust Wallet connection failed.';
+      setError(message);
+      const wrapped = new Error(message);
+      wrapped.code = connectError?.code;
+      throw wrapped;
+    }
+  }, []);
+
   /** WalletConnect v2 in-app pairing — the QR payload arrives through `pairingUri`. */
   const connectWalletConnect = useCallback(async (options = {}) => {
     setError(null);
@@ -290,6 +329,7 @@ export function useWallet() {
 
     // --- actions ---
     connectWallet,
+    connectTrustWallet,
     connectWalletConnect,
     connectAppKit,
     disconnectWallet,

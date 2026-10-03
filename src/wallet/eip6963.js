@@ -14,7 +14,10 @@ const REQUEST_EVENT = 'eip6963:requestProvider';
 export const KNOWN_WALLETS = [
   { id: 'metamask', name: 'MetaMask', rdns: ['io.metamask', 'io.metamask.flask'], icon: '🦊', url: 'https://metamask.io/download/' },
   { id: 'phantom', name: 'Phantom', rdns: ['app.phantom'], icon: '👻', url: 'https://phantom.app/download' },
-  { id: 'trust', name: 'Trust Wallet', rdns: ['com.trustwallet.app', 'com.trustwallet.wallet', 'com.trustwallet'], icon: '🛡️', url: 'https://trustwallet.com/download' },
+  // Trust Wallet rdns: docs say `com.trustwallet.app`, but shipped builds have
+  // also been observed announcing as `app.trustwallet.com` — match both (+ the
+  // generic `trustwallet` containment fallback in brandFor below).
+  { id: 'trust', name: 'Trust Wallet', rdns: ['com.trustwallet.app', 'app.trustwallet.com', 'com.trustwallet.wallet', 'com.trustwallet'], icon: '🛡️', url: 'https://trustwallet.com/download' },
   { id: 'coinbase', name: 'Coinbase Wallet', rdns: ['com.coinbase.wallet', 'com.coinbase.wallet.extension'], icon: '🔵', url: 'https://www.coinbase.com/wallet/downloads' },
   { id: 'okx', name: 'OKX Wallet', rdns: ['com.okex.wallet', 'io.okx'], icon: '⭕', url: 'https://www.okx.com/web3' },
   { id: 'binance', name: 'Binance Wallet', rdns: ['com.binance.wallet', 'binance-wallet'], icon: '🟡', url: 'https://www.binance.com/en/web3wallet' },
@@ -27,6 +30,9 @@ function brandFor(rdns = '', name = '') {
   const needleName = String(name).toLowerCase();
   return (
     KNOWN_WALLETS.find((wallet) => wallet.rdns.some((known) => needleRdns === known || needleRdns.startsWith(known))) ||
+    // Trust Wallet ships builds that announce different rdns strings over time;
+    // every one of them contains "trustwallet", which is unique enough to brand.
+    (needleRdns.includes('trustwallet') ? KNOWN_WALLETS.find((wallet) => wallet.id === 'trust') : null) ||
     KNOWN_WALLETS.find((wallet) => needleName.includes(wallet.id) || needleName.includes(wallet.name.toLowerCase())) ||
     null
   );
@@ -47,8 +53,8 @@ function toEntry({ info, provider }) {
   };
 }
 
-/** Collects all announced providers (resolves after ~300ms of silence). */
-export function discoverInjectedProviders({ timeoutMs = 300 } = {}) {
+/** Collects all announced providers (resolves after ~500ms of silence). */
+export function discoverInjectedProviders({ timeoutMs = 500 } = {}) {
   if (typeof window === 'undefined') return Promise.resolve([]);
 
   return new Promise((resolve) => {
@@ -77,17 +83,25 @@ export function discoverInjectedProviders({ timeoutMs = 300 } = {}) {
  */
 function legacyInjectedProviders(alreadyFound) {
   const seenRdns = new Set([...alreadyFound.keys()]);
+  // Also dedup by brand id: an EIP-6963 announcement and a legacy injection of
+  // the SAME wallet (e.g. Trust with rdns app.trustwallet.com vs com.trustwallet.app)
+  // must not produce two buttons.
+  const seenBrandIds = new Set([...alreadyFound.values()].map((entry) => entry.brandId).filter(Boolean));
   const injected = [];
 
   const candidates = [];
   if (window.ethereum?.providers?.length) candidates.push(...window.ethereum.providers);
   if (window.ethereum) candidates.push(window.ethereum);
+  // Trust Wallet's documented injection point: builds that neither announce via
+  // EIP-6963 nor win the window.ethereum race still expose window.trustwallet.
+  if (window.trustwallet) candidates.push(window.trustwallet);
 
   for (const provider of candidates) {
     if (!provider || typeof provider.request !== 'function') continue;
     const brand = detectLegacyBrand(provider);
-    if (!brand || seenRdns.has(brand.rdns)) continue;
+    if (!brand || seenRdns.has(brand.rdns) || seenBrandIds.has(brand.id)) continue;
     seenRdns.add(brand.rdns);
+    seenBrandIds.add(brand.id);
     injected.push({
       id: brand.rdns,
       name: brand.name,
@@ -109,11 +123,45 @@ export function detectLegacyBrand(provider) {
   if (provider.isBraveWallet) return { ...KNOWN_WALLETS[6], rdns: 'com.brave.wallet' };
   if (provider.isRabby) return { id: 'rabby', name: 'Rabby', icon: '🐰', rdns: 'io.rabby' };
   if (provider.isCoinbaseWallet) return { ...KNOWN_WALLETS[3], rdns: 'com.coinbase.wallet' };
-  if (provider.isTrust || provider.isTrustWallet) return { ...KNOWN_WALLETS[2], rdns: 'com.trustwallet.app' };
+  if (
+    provider.isTrust ||
+    provider.isTrustWallet ||
+    (typeof window !== 'undefined' && window.trustwallet === provider)
+  ) {
+    return { ...KNOWN_WALLETS[2], rdns: 'com.trustwallet.app' };
+  }
   if (provider.isPhantom || provider.isPhantomWallet) return { ...KNOWN_WALLETS[1], rdns: 'app.phantom' };
   if (provider.isOKExWallet || provider.isOkxWallet) return { ...KNOWN_WALLETS[4], rdns: 'com.okex.wallet' };
   if (provider.isBinance || provider.isBinanceWallet) return { ...KNOWN_WALLETS[5], rdns: 'com.binance.wallet' };
   if (provider.isMetaMask) return { ...KNOWN_WALLETS[0], rdns: 'io.metamask' };
+  return null;
+}
+
+/**
+ * Best-effort direct Trust Wallet lookup used by the manual "Trust Wallet"
+ * connect button: any discovered entry (any rdns build) wins, otherwise the
+ * documented `window.trustwallet` injection point is used directly — so a
+ * missed/late EIP-6963 announcement can never block the connection.
+ * Returns null only when no Trust provider exists in this browser at all.
+ */
+export function findTrustWalletEntry(discovered = null) {
+  const entries = discovered?.all || [];
+  const entry = entries.find((wallet) => wallet.brandId === 'trust' && wallet.provider);
+  if (entry) return entry;
+
+  if (typeof window !== 'undefined' && window.trustwallet && typeof window.trustwallet.request === 'function') {
+    return {
+      id: 'com.trustwallet.app',
+      name: 'Trust Wallet',
+      icon: '🛡️',
+      brandId: 'trust',
+      rdns: 'com.trustwallet.app',
+      installed: true,
+      evm: true,
+      provider: window.trustwallet,
+      legacy: true
+    };
+  }
   return null;
 }
 

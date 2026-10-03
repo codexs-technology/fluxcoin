@@ -4,11 +4,32 @@
  * is not installed is never silently replaced by a fake one.
  */
 import { walletManager } from './manager.js';
-import { discoverAllWallets } from './eip6963.js';
+import { discoverAllWallets, findTrustWalletEntry } from './eip6963.js';
 
 /** Connect an installed browser extension wallet (MetaMask, Phantom, Trust, ...). */
 export async function connectWithInjected(walletEntry) {
   return walletManager.connectInjected(walletEntry);
+}
+
+/**
+ * Manual "Trust Wallet" connect — used by the pinned button in the wallet
+ * picker. Works even when the EIP-6963 announcement was missed or the
+ * extension uses an unexpected rdns: every discovered Trust build matches, and
+ * the documented `window.trustwallet` injection point is checked directly.
+ * Throws an error with code `TRUST_WALLET_NOT_FOUND` when nothing is installed
+ * so the UI can fall back to the WalletConnect QR / Trust deep link.
+ */
+export async function connectTrustWallet() {
+  const discovered = await discoverAllWallets();
+  const entry = findTrustWalletEntry(discovered);
+  if (!entry) {
+    const error = new Error(
+      'Trust Wallet was not detected in this browser. Install the extension from trustwallet.com/download and reload, or use the WalletConnect QR code with the Trust mobile app.'
+    );
+    error.code = 'TRUST_WALLET_NOT_FOUND';
+    throw error;
+  }
+  return walletManager.connectInjected(entry);
 }
 
 /** Connect a mobile wallet through WalletConnect v2 (QR + deep link). */

@@ -18,6 +18,7 @@ import { useWallet } from '../hooks/useWallet';
 import { explorerAddressUrl, ACTIVE_CHAIN } from '../wallet/chains.js';
 import { importAllFlashAssets } from '../wallet/watchAsset.js';
 import WalletQrModal from './WalletQrModal';
+import { trustWalletDeepLink } from '../wallet/walletConnectEngine.js';
 
 function formatNative(value) {
   if (value === null || value === undefined || value === '') return '—';
@@ -46,6 +47,7 @@ export function WalletConnect() {
     installableWallets,
     appKitAvailable,
     connectWallet,
+    connectTrustWallet,
     connectWalletConnect,
     connectAppKit,
     disconnectWallet,
@@ -59,6 +61,9 @@ export function WalletConnect() {
   const [qrStatus, setQrStatus] = useState('waiting');
   const [qrError, setQrError] = useState(null);
   const [busyId, setBusyId] = useState(null);
+  const [trustBusy, setTrustBusy] = useState(false);
+  /** Set while waiting for the WC pairing URI to deep link into the Trust app. */
+  const [trustWcFallback, setTrustWcFallback] = useState(false);
   const [copied, setCopied] = useState(false);
   /** One-click "add all Flash tokens to the wallet" (EIP-747 watchAsset). */
   const [importingTokens, setImportingTokens] = useState(false);
@@ -121,6 +126,44 @@ export function WalletConnect() {
     }
   }, [connectWalletConnect]);
 
+  /** True when the browser is a phone — WalletConnect should deep link into the app. */
+  const isMobileDevice =
+    typeof navigator !== 'undefined' && /android|iphone|ipad|ipod/i.test(navigator.userAgent);
+
+  /**
+   * Pinned "Trust Wallet" connect: tries the extension directly (any rdns build
+   * + the documented window.trustwallet injection, so a missed EIP-6963
+   * announcement never blocks it). When the extension is not installed we fall
+   * back to WalletConnect pairing — on a phone that jumps straight into the
+   * Trust app via https://link.trustwallet.com/wc?uri=..., on desktop the QR
+   * modal opens so the Trust mobile app can scan it.
+   */
+  const handleTrustConnect = useCallback(async () => {
+    setTrustBusy(true);
+    clearError();
+    try {
+      await connectTrustWallet();
+      setPickerOpen(false);
+    } catch (trustError) {
+      if (trustError?.code === 'TRUST_WALLET_NOT_FOUND') {
+        setTrustWcFallback(isMobileDevice);
+        await startWalletConnect();
+      }
+      /* every other reason (rejected prompt, backend offline, …) is already
+         surfaced by the hook error banner — no silent fallback */
+    } finally {
+      setTrustBusy(false);
+    }
+  }, [clearError, connectTrustWallet, isMobileDevice, startWalletConnect]);
+
+  // Mobile fallback: as soon as the pairing URI exists, jump into the Trust app.
+  useEffect(() => {
+    if (!trustWcFallback || !pairingUri) return;
+    setTrustWcFallback(false);
+    const link = trustWalletDeepLink(pairingUri);
+    if (link) window.location.href = link;
+  }, [trustWcFallback, pairingUri]);
+
   const startAppKit = useCallback(async () => {
     try {
       await connectAppKit();
@@ -147,6 +190,8 @@ export function WalletConnect() {
   }, []);
   const activeChainInfo = chains.find((chain) => chain.chainId === chainId) || null;
   const explorerUrl = address ? explorerAddressUrl(address, chainId) : null;
+  /** Trust Wallet shown by auto-detection (the pinned button works regardless). */
+  const trustInstalled = injectedWallets.some((entry) => entry.brandId === 'trust');
 
   return (
     <div className="space-y-2">
@@ -276,6 +321,31 @@ export function WalletConnect() {
                 dashboard.reown.com) and restart the dev server. Extension wallets below work without it.
               </div>
             )}
+
+            <div>
+              <div className="text-[10px] font-mono text-slate-400 uppercase mb-2">Quick connect</div>
+              <button
+                onClick={handleTrustConnect}
+                disabled={trustBusy}
+                className="w-full p-3 rounded-md bg-sky-950/50 border border-sky-500/40 hover:border-sky-400 hover:bg-sky-900/50 text-left flex items-center justify-between disabled:opacity-50 transition-all"
+              >
+                <span className="flex items-center space-x-2.5">
+                  <span className="text-lg">🛡️</span>
+                  <span className="text-xs font-mono font-semibold text-slate-100">
+                    {trustBusy ? 'Connecting…' : 'Trust Wallet'}
+                  </span>
+                </span>
+                <span className="text-[10px] font-mono text-sky-300">
+                  {trustInstalled ? 'DETECTED →' : 'CONNECT →'}
+                </span>
+              </button>
+              {!trustInstalled && (
+                <div className="text-[10px] font-mono text-slate-500 mt-1">
+                  Extension not auto-detected? This button also checks window.trustwallet directly and falls back to the
+                  WalletConnect QR / Trust app deep link.
+                </div>
+              )}
+            </div>
 
             <div>
               <div className="text-[10px] font-mono text-slate-400 uppercase mb-2">

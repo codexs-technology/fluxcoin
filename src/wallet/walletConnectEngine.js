@@ -26,11 +26,19 @@ function rpcMap() {
   }, {});
 }
 
+/**
+ * Trust Wallet WalletConnect deep link — opens the Trust mobile app directly on
+ * the pairing approval screen (https://link.trustwallet.com/wc?uri=...).
+ */
+export function trustWalletDeepLink(uri) {
+  return uri ? `https://link.trustwallet.com/wc?uri=${encodeURIComponent(uri)}` : null;
+}
+
 function deepLinks(uri) {
   const encoded = encodeURIComponent(uri);
   return [
+    { id: 'trust', label: 'Trust Wallet', icon: '🛡️', url: trustWalletDeepLink(uri) },
     { id: 'metamask', label: 'MetaMask', icon: '🦊', url: `https://metamask.app.link/wc?uri=${encoded}` },
-    { id: 'trust', label: 'Trust Wallet', icon: '🛡️', url: `https://link.trustwallet.com/wc?uri=${encoded}` },
     { id: 'rainbow', label: 'Rainbow', icon: '🌈', url: `https://rnbwapp.com/wc?uri=${encoded}` },
     { id: 'phantom', label: 'Phantom', icon: '👻', url: `https://phantom.app/ul/wc?uri=${encoded}` },
     { id: 'coinbase', label: 'Coinbase Wallet', icon: '🔵', url: `https://go.cb-w.com/wc?uri=${encoded}` },
